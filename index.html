@@ -419,6 +419,7 @@
       { id: 'meditation', name: 'Meditation', icon: '🧘‍♂️', points: 1, stealthName: 'MIND_01', stealthIcon: '◎' },
       { id: 'prayer', name: 'Hanuman Chalisa', icon: '🙏', points: 1, stealthName: 'MIND_02', stealthIcon: '✧' },
       { id: 'journal', name: 'Journaling', icon: '📝', points: 1, stealthName: 'MIND_03', stealthIcon: '▢' },
+      { id: 'therapy', name: 'Mental Reset', icon: '🧠', points: 2, isWeekly: true, stealthName: 'MIND_04', stealthIcon: '⬡' },
       { id: 'reading', name: 'Reading', icon: '📚', points: 2, stealthName: 'GROW_01', stealthIcon: '▣' },
       { id: 'career', name: 'Career Dev', icon: '🚀', points: 1, stealthName: 'GROW_02', stealthIcon: '△' },
 
@@ -556,12 +557,26 @@
       return sleepPoints >= 1; // Must be at goal (11:00 PM) or better
     };
 
+    // Check if a weekly habit was completed on any day this week
+    const isWeeklyHabitComplete = (week, habitId) => {
+      const habit = HABITS.find(h => h.id === habitId);
+      if (!habit) return false;
+      return week.days.some(day => (day.habits[habitId] ?? 0) >= habit.points);
+    };
+
+    // Get the day index where a weekly habit was completed (for display)
+    const getWeeklyHabitCompletionDay = (week, habitId) => {
+      const habit = HABITS.find(h => h.id === habitId);
+      if (!habit) return -1;
+      return week.days.findIndex(day => (day.habits[habitId] ?? 0) >= habit.points);
+    };
+
     const createEmptyDay = (date) => ({
       date: date.toISOString(),
       habits: {
         nofap: 0, gym: 0, yoga: 0, lunch: 0, dinner: 0, loseit: 0, weight: 0,
         laundry: 0, dishes: 0, cleaning: 0, meditation: 0,
-        prayer: 0, sunset: 0, sleep: 0, journal: 0, reading: 0, career: 0
+        prayer: 0, sunset: 0, sleep: 0, journal: 0, reading: 0, career: 0, therapy: 0
       },
       pagesRead: 0,
       sleepTime: null,      // Store actual sleep time (HH:MM format)
@@ -662,6 +677,13 @@
             careerPoints = Math.floor(careerPoints / 2);
           }
           score += careerPoints;
+        } else if (habit.isWeekly && week) {
+          // Weekly habits: Only count points on the day it was completed
+          // (avoid double-counting across the week)
+          const habitValue = day.habits[habit.id] ?? 0;
+          if (habitValue >= habit.points) {
+            score += habit.points;
+          }
         } else {
           // Handle missing habits (like weight added later)
           score += day.habits[habit.id] ?? 0;
@@ -1153,6 +1175,15 @@
         const habit = HABITS.find(h => h.id === habitId);
         if (!habit) return; // Safety check
 
+        // Handle weekly habits - only allow toggle on one day per week
+        if (habit.isWeekly) {
+          const completionDayIdx = getWeeklyHabitCompletionDay(currentWeek, habitId);
+          // If already completed on a different day, don't allow toggling here
+          if (completionDayIdx !== -1 && completionDayIdx !== dayIndex) {
+            return; // Already done this week on another day
+          }
+        }
+
         // Handle missing habit in old saved data
         const currentValue = day.habits[habitId] ?? 0;
         const newValue = currentValue === habit.points ? 0 : habit.points;
@@ -1597,10 +1628,10 @@
                       {HABITS.map((habit, habitIdx) => {
                         // Determine tier marker color
                         let tierMarker = 5; // default maintenance
-                        if (habitIdx < 3) tierMarker = 1; // Neural
-                        else if (habitIdx < 7) tierMarker = 2; // Nutrition
-                        else if (habitIdx < 9) tierMarker = 3; // Physical
-                        else if (habitIdx < 14) tierMarker = 4; // Mind
+                        if (habitIdx < 3) tierMarker = 1; // Neural (nofap, sleep, sunset)
+                        else if (habitIdx < 7) tierMarker = 2; // Nutrition (lunch, dinner, diet, weight)
+                        else if (habitIdx < 9) tierMarker = 3; // Physical (gym, yoga)
+                        else if (habitIdx < 15) tierMarker = 4; // Mind (meditation, prayer, journal, therapy, reading, career)
 
                         // Calculate habit total for the week
                         let habitWeekTotal = 0;
@@ -1657,6 +1688,25 @@
                                 cellValue = 1;
                                 cellDisplay = 'R';
                                 cellClass = 'matrix-score-partial';
+                              } else if (habit.isWeekly) {
+                                // Weekly habit: Show where it was completed
+                                const weeklyComplete = isWeeklyHabitComplete(currentWeek, habit.id);
+                                const completionDayIdx = getWeeklyHabitCompletionDay(currentWeek, habit.id);
+                                const isCompletedOnThisDay = completionDayIdx === dayIdx;
+
+                                if (isCompletedOnThisDay) {
+                                  cellValue = habit.points;
+                                  cellDisplay = `+${habit.points}`;
+                                  cellClass = 'matrix-score-full';
+                                } else if (weeklyComplete) {
+                                  cellValue = 0; // Don't double count
+                                  cellDisplay = '✓';
+                                  cellClass = 'matrix-score-partial';
+                                } else {
+                                  cellValue = 0;
+                                  cellDisplay = '-';
+                                  cellClass = 'matrix-score-zero';
+                                }
                               } else {
                                 cellValue = day.habits[habit.id] ?? 0;
                                 cellDisplay = cellValue > 0 ? `+${cellValue}` : '0';
@@ -1690,6 +1740,13 @@
                                     total += Math.floor((day.pagesRead || 0) / 20);
                                   } else if (habit.id === 'gym' && day.isVitalRest) {
                                     total += 1;
+                                  } else if (habit.isWeekly) {
+                                    // Weekly habits only count once - check if this is completion day
+                                    const completionDayIdx = getWeeklyHabitCompletionDay(currentWeek, habit.id);
+                                    const thisDayIdx = currentWeek.days.findIndex(d => d === day);
+                                    if (completionDayIdx === thisDayIdx) {
+                                      total += habit.points;
+                                    }
                                   } else {
                                     total += day.habits[habit.id] ?? 0;
                                   }
@@ -2108,6 +2165,44 @@
                             // Handle habits that might be missing in old saved data (like weight)
                             const habitValue = day.habits[habit.id] ?? 0;
                             const isComplete = habitValue === habit.points;
+
+                            // Handle weekly habits
+                            if (habit.isWeekly) {
+                              const weeklyComplete = isWeeklyHabitComplete(currentWeek, habit.id);
+                              const completionDayIdx = getWeeklyHabitCompletionDay(currentWeek, habit.id);
+                              const isCompletedOnThisDay = completionDayIdx === actualDayIndex;
+                              const isCompletedOnOtherDay = weeklyComplete && !isCompletedOnThisDay;
+
+                              return (
+                                <button
+                                  key={habit.id}
+                                  onClick={() => toggleHabit(actualDayIndex, habit.id)}
+                                  disabled={isDisabled || isCompletedOnOtherDay}
+                                  className={`habit-btn p-3 rounded-lg font-semibold text-sm flex items-center justify-between ${
+                                    isDisabled
+                                      ? 'opacity-50 cursor-not-allowed bg-gray-700'
+                                      : isCompletedOnThisDay
+                                      ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white'
+                                      : isCompletedOnOtherDay
+                                      ? 'bg-gradient-to-r from-sky-600/50 to-indigo-600/50 text-white/80 cursor-default'
+                                      : 'bg-white/5 hover:bg-white/10 text-purple-300'
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <span className="text-lg habit-icon">{stealthMode ? habit.stealthIcon : habit.icon}</span>
+                                    <span className="flex flex-col items-start">
+                                      <span className="text-xs">{stealthMode ? habit.stealthName : habit.name}</span>
+                                      <span className="text-[9px] text-purple-400/70">
+                                        {isCompletedOnOtherDay ? '✓ Done this week' : 'Weekly'}
+                                      </span>
+                                    </span>
+                                  </span>
+                                  <span className="text-xs mono opacity-75">
+                                    {weeklyComplete ? habit.points : 0}/{habit.points}
+                                  </span>
+                                </button>
+                              );
+                            }
 
                             return (
                               <button
@@ -2747,6 +2842,7 @@ function doPost(e) {
                 <div className="flex justify-between"><span>Sleep (variable: -1 to +2)</span><span className="text-blue-400">time-based</span></div>
                 <div className="flex justify-between"><span>Most other habits</span><span className="text-green-400">1 pt each</span></div>
                 <div className="flex justify-between"><span>Weight Logged (just track it!)</span><span className="text-green-400">0.5 pts</span></div>
+                <div className="flex justify-between"><span>Mental Reset (weekly - therapy)</span><span className="text-sky-400">2 pts/week</span></div>
               </div>
             </div>
 
