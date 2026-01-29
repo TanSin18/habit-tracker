@@ -274,6 +274,113 @@
       font-weight: bold;
       font-family: 'Space Mono', monospace;
     }
+
+    /* Weekly Matrix Grid styles */
+    .weekly-matrix {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .matrix-table {
+      min-width: 100%;
+      border-collapse: separate;
+      border-spacing: 2px;
+    }
+
+    .matrix-cell {
+      text-align: center;
+      padding: 6px 4px;
+      font-size: 10px;
+      border-radius: 4px;
+      min-width: 40px;
+      transition: all 0.15s ease;
+    }
+
+    .matrix-cell:hover {
+      transform: scale(1.05);
+      z-index: 5;
+    }
+
+    .matrix-header {
+      font-weight: 600;
+      color: #a78bfa;
+      background: rgba(139, 92, 246, 0.1);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .matrix-habit-name {
+      text-align: left;
+      padding: 6px 8px;
+      font-weight: 500;
+      font-size: 11px;
+      white-space: nowrap;
+      position: sticky;
+      left: 0;
+      background: rgba(15, 15, 35, 0.95);
+      z-index: 5;
+      min-width: 100px;
+    }
+
+    .matrix-score-full {
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.6), rgba(5, 150, 105, 0.6));
+      color: white;
+    }
+
+    .matrix-score-partial {
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.5), rgba(217, 119, 6, 0.5));
+      color: white;
+    }
+
+    .matrix-score-zero {
+      background: rgba(239, 68, 68, 0.15);
+      color: rgba(239, 68, 68, 0.7);
+    }
+
+    .matrix-score-negative {
+      background: rgba(239, 68, 68, 0.4);
+      color: white;
+    }
+
+    .matrix-future {
+      background: rgba(255, 255, 255, 0.03);
+      color: rgba(255, 255, 255, 0.2);
+    }
+
+    .matrix-off-day {
+      background: rgba(100, 100, 100, 0.2);
+      color: rgba(255, 255, 255, 0.3);
+    }
+
+    .matrix-today-col {
+      box-shadow: inset 0 0 0 2px rgba(139, 92, 246, 0.5);
+    }
+
+    .matrix-total-row {
+      font-weight: bold;
+      background: rgba(139, 92, 246, 0.15);
+      border-top: 2px solid rgba(139, 92, 246, 0.3);
+    }
+
+    .matrix-habit-row:nth-child(odd) .matrix-habit-name {
+      background: rgba(15, 15, 35, 0.98);
+    }
+
+    /* Tier indicators for habit rows */
+    .tier-marker {
+      display: inline-block;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      margin-right: 4px;
+    }
+
+    .tier-marker-1 { background: #f59e0b; } /* Neural */
+    .tier-marker-2 { background: #10b981; } /* Nutrition */
+    .tier-marker-3 { background: #3b82f6; } /* Physical */
+    .tier-marker-4 { background: #8b5cf6; } /* Mind */
+    .tier-marker-5 { background: #6b7280; } /* Maintenance */
   </style>
 </head>
 <body>
@@ -1422,27 +1529,273 @@
             <div className="flex gap-2 mb-6 animate-slide-in">
               <button
                 onClick={() => switchViewMode('today')}
-                className={`flex-1 py-3 rounded-xl font-bold transition-all ${
+                className={`flex-1 py-3 rounded-xl font-bold transition-all text-sm ${
                   state.viewMode === 'today'
                     ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white'
                     : 'glass text-purple-300 hover:bg-white/10'
                 }`}
               >
-                Today Only
+                Today
               </button>
               <button
                 onClick={() => switchViewMode('all-days')}
-                className={`flex-1 py-3 rounded-xl font-bold transition-all ${
+                className={`flex-1 py-3 rounded-xl font-bold transition-all text-sm ${
                   state.viewMode === 'all-days'
                     ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white'
                     : 'glass text-purple-300 hover:bg-white/10'
                 }`}
               >
-                All Days
+                Days
+              </button>
+              <button
+                onClick={() => switchViewMode('grid')}
+                className={`flex-1 py-3 rounded-xl font-bold transition-all text-sm ${
+                  state.viewMode === 'grid'
+                    ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white'
+                    : 'glass text-purple-300 hover:bg-white/10'
+                }`}
+              >
+                Matrix
               </button>
             </div>
 
-            {/* Days Display */}
+            {/* Weekly Matrix Grid View */}
+            {state.viewMode === 'grid' && (
+              <div className="glass rounded-xl p-4 mb-6 animate-slide-in">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-purple-200">Weekly Performance Matrix</h3>
+                  <div className="text-xs text-purple-400 mono">
+                    Week {state.currentWeek + 1}
+                  </div>
+                </div>
+
+                <div className="weekly-matrix">
+                  <table className="matrix-table w-full">
+                    <thead>
+                      <tr>
+                        <th className="matrix-cell matrix-header matrix-habit-name">Habit</th>
+                        {currentWeek.days.map((day, idx) => {
+                          const date = new Date(day.date);
+                          const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                          const isToday = isSameDay(date, new Date());
+                          const isFuture = isFutureDay(day.date);
+                          return (
+                            <th
+                              key={idx}
+                              className={`matrix-cell matrix-header ${isToday ? 'matrix-today-col' : ''} ${isFuture ? 'opacity-40' : ''}`}
+                            >
+                              <div className="font-bold">{dayNames[date.getDay()]}</div>
+                              <div className="text-[9px] opacity-70">{date.getDate()}</div>
+                            </th>
+                          );
+                        })}
+                        <th className="matrix-cell matrix-header">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Habit Rows */}
+                      {HABITS.map((habit, habitIdx) => {
+                        // Determine tier marker color
+                        let tierMarker = 5; // default maintenance
+                        if (habitIdx < 3) tierMarker = 1; // Neural
+                        else if (habitIdx < 7) tierMarker = 2; // Nutrition
+                        else if (habitIdx < 9) tierMarker = 3; // Physical
+                        else if (habitIdx < 14) tierMarker = 4; // Mind
+
+                        // Calculate habit total for the week
+                        let habitWeekTotal = 0;
+
+                        return (
+                          <tr key={habit.id} className="matrix-habit-row">
+                            <td className="matrix-cell matrix-habit-name">
+                              <span className={`tier-marker tier-marker-${tierMarker}`} />
+                              <span className="habit-icon mr-1">{stealthMode ? habit.stealthIcon : habit.icon}</span>
+                              <span>{stealthMode ? habit.stealthName : habit.name}</span>
+                            </td>
+                            {currentWeek.days.map((day, dayIdx) => {
+                              const isToday = isSameDay(new Date(day.date), new Date());
+                              const isFuture = isFutureDay(day.date);
+                              const isWeekend = isWeekendDay(day.date);
+
+                              if (day.isOffDay) {
+                                return (
+                                  <td key={dayIdx} className={`matrix-cell matrix-off-day ${isToday ? 'matrix-today-col' : ''}`}>
+                                    -
+                                  </td>
+                                );
+                              }
+
+                              if (isFuture) {
+                                return (
+                                  <td key={dayIdx} className={`matrix-cell matrix-future ${isToday ? 'matrix-today-col' : ''}`}>
+                                    -
+                                  </td>
+                                );
+                              }
+
+                              let cellValue = 0;
+                              let cellDisplay = '';
+                              let cellClass = 'matrix-score-zero';
+
+                              // Handle special habits
+                              if (habit.id === 'sleep') {
+                                cellValue = calculateSleepPoints(day.sleepTime, isWeekend);
+                                cellDisplay = cellValue >= 0 ? `+${cellValue}` : cellValue;
+                                if (cellValue >= 2) cellClass = 'matrix-score-full';
+                                else if (cellValue >= 1) cellClass = 'matrix-score-partial';
+                                else if (cellValue < 0) cellClass = 'matrix-score-negative';
+                              } else if (habit.id === 'sunset') {
+                                cellValue = calculateSunsetPoints(day.sunsetTime, isWeekend);
+                                cellDisplay = `+${cellValue}`;
+                                cellClass = cellValue >= 1 ? 'matrix-score-full' : 'matrix-score-zero';
+                              } else if (habit.id === 'reading') {
+                                cellValue = Math.floor((day.pagesRead || 0) / 20);
+                                cellDisplay = `+${cellValue}`;
+                                if (cellValue >= 2) cellClass = 'matrix-score-full';
+                                else if (cellValue >= 1) cellClass = 'matrix-score-partial';
+                              } else if (habit.id === 'gym' && day.isVitalRest) {
+                                cellValue = 1;
+                                cellDisplay = 'R';
+                                cellClass = 'matrix-score-partial';
+                              } else {
+                                cellValue = day.habits[habit.id] ?? 0;
+                                cellDisplay = cellValue > 0 ? `+${cellValue}` : '0';
+                                cellClass = cellValue >= habit.points ? 'matrix-score-full' : cellValue > 0 ? 'matrix-score-partial' : 'matrix-score-zero';
+                              }
+
+                              habitWeekTotal += cellValue;
+
+                              return (
+                                <td
+                                  key={dayIdx}
+                                  className={`matrix-cell ${cellClass} ${isToday ? 'matrix-today-col' : ''}`}
+                                  title={`${habit.name}: ${cellValue} pts`}
+                                >
+                                  {cellDisplay}
+                                </td>
+                              );
+                            })}
+                            <td className="matrix-cell matrix-total-row">
+                              {(() => {
+                                // Recalculate for the total column
+                                let total = 0;
+                                currentWeek.days.forEach(day => {
+                                  if (day.isOffDay || isFutureDay(day.date)) return;
+                                  const isWeekend = isWeekendDay(day.date);
+                                  if (habit.id === 'sleep') {
+                                    total += calculateSleepPoints(day.sleepTime, isWeekend);
+                                  } else if (habit.id === 'sunset') {
+                                    total += calculateSunsetPoints(day.sunsetTime, isWeekend);
+                                  } else if (habit.id === 'reading') {
+                                    total += Math.floor((day.pagesRead || 0) / 20);
+                                  } else if (habit.id === 'gym' && day.isVitalRest) {
+                                    total += 1;
+                                  } else {
+                                    total += day.habits[habit.id] ?? 0;
+                                  }
+                                });
+                                return total;
+                              })()}
+                            </td>
+                          </tr>
+                        );
+                      })}
+
+                      {/* Daily Totals Row */}
+                      <tr className="matrix-total-row">
+                        <td className="matrix-cell matrix-habit-name font-bold">
+                          DAILY TOTAL
+                        </td>
+                        {currentWeek.days.map((day, dayIdx) => {
+                          const isToday = isSameDay(new Date(day.date), new Date());
+                          const isFuture = isFutureDay(day.date);
+
+                          if (day.isOffDay) {
+                            return (
+                              <td key={dayIdx} className={`matrix-cell matrix-off-day ${isToday ? 'matrix-today-col' : ''}`}>
+                                OFF
+                              </td>
+                            );
+                          }
+
+                          if (isFuture) {
+                            return (
+                              <td key={dayIdx} className={`matrix-cell matrix-future ${isToday ? 'matrix-today-col' : ''}`}>
+                                -
+                              </td>
+                            );
+                          }
+
+                          const dayScore = calculateDailyScore(day, state.adHocTasks, currentWeek);
+                          return (
+                            <td
+                              key={dayIdx}
+                              className={`matrix-cell font-bold ${isToday ? 'matrix-today-col' : ''} ${
+                                dayScore >= 18 ? 'text-green-400' :
+                                dayScore >= 12 ? 'text-blue-400' :
+                                dayScore >= 8 ? 'text-yellow-400' : 'text-red-400'
+                              }`}
+                            >
+                              {dayScore}
+                            </td>
+                          );
+                        })}
+                        <td className="matrix-cell font-bold text-purple-300">
+                          {stats.effectiveScore}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Matrix Legend */}
+                <div className="mt-4 flex flex-wrap gap-3 justify-center text-[10px]">
+                  <div className="flex items-center gap-1">
+                    <div className="w-4 h-4 rounded matrix-score-full" />
+                    <span className="text-purple-300">Full</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-4 h-4 rounded matrix-score-partial" />
+                    <span className="text-purple-300">Partial</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-4 h-4 rounded matrix-score-zero" />
+                    <span className="text-purple-300">Missed</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-4 h-4 rounded matrix-score-negative" />
+                    <span className="text-purple-300">Penalty</span>
+                  </div>
+                </div>
+
+                {/* Tier Legend */}
+                <div className="mt-3 flex flex-wrap gap-3 justify-center text-[10px] border-t border-purple-500/20 pt-3">
+                  <div className="flex items-center gap-1">
+                    <span className="tier-marker tier-marker-1" />
+                    <span className="text-purple-400">Neural</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="tier-marker tier-marker-2" />
+                    <span className="text-purple-400">Nutrition</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="tier-marker tier-marker-3" />
+                    <span className="text-purple-400">Physical</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="tier-marker tier-marker-4" />
+                    <span className="text-purple-400">Mind</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="tier-marker tier-marker-5" />
+                    <span className="text-purple-400">Maintenance</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Days Display (List View) */}
+            {state.viewMode !== 'grid' && (
             <div className="space-y-4">
               {daysToShow.map((day, dayIndex) => {
                 const actualDayIndex = state.viewMode === 'today'
@@ -1870,6 +2223,7 @@
                 );
               })}
             </div>
+            )}
 
             {/* Tasks Management */}
             {(() => {
