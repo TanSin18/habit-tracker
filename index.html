@@ -546,17 +546,18 @@
           if (day.isVitalRest) {
             score += 1; // Recovery point
           } else {
-            score += day.habits[habit.id];
+            score += day.habits[habit.id] ?? 0;
           }
         } else if (habit.id === 'career') {
           // Sunday Reset Clause: If Sunday sleep was late, halve Monday career points
-          let careerPoints = day.habits[habit.id];
+          let careerPoints = day.habits[habit.id] ?? 0;
           if (isMonday && week && !wasSundaySleepOnTime(week)) {
             careerPoints = Math.floor(careerPoints / 2);
           }
           score += careerPoints;
         } else {
-          score += day.habits[habit.id];
+          // Handle missing habits (like weight added later)
+          score += day.habits[habit.id] ?? 0;
         }
       });
 
@@ -1043,7 +1044,10 @@
         if (habitId === 'reading' || habitId === 'sleep' || habitId === 'sunset') return; // These use separate inputs
 
         const habit = HABITS.find(h => h.id === habitId);
-        const currentValue = day.habits[habitId];
+        if (!habit) return; // Safety check
+
+        // Handle missing habit in old saved data
+        const currentValue = day.habits[habitId] ?? 0;
         const newValue = currentValue === habit.points ? 0 : habit.points;
 
         // Haptic feedback based on habit importance
@@ -1748,7 +1752,9 @@
                               );
                             }
 
-                            const isComplete = day.habits[habit.id] === habit.points;
+                            // Handle habits that might be missing in old saved data (like weight)
+                            const habitValue = day.habits[habit.id] ?? 0;
+                            const isComplete = habitValue === habit.points;
 
                             return (
                               <button
@@ -1768,7 +1774,7 @@
                                   <span className="text-xs">{stealthMode ? habit.stealthName : habit.name}</span>
                                 </span>
                                 <span className="text-xs mono opacity-75">
-                                  {day.habits[habit.id]}/{habit.points}
+                                  {habitValue}/{habit.points}
                                 </span>
                               </button>
                             );
