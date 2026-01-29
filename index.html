@@ -381,6 +381,95 @@
     .tier-marker-3 { background: #3b82f6; } /* Physical */
     .tier-marker-4 { background: #8b5cf6; } /* Mind */
     .tier-marker-5 { background: #6b7280; } /* Maintenance */
+
+    /* Screen Timer Styles */
+    .screen-timer {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .screen-timer-running {
+      animation: timerPulse 2s ease-in-out infinite;
+    }
+
+    @keyframes timerPulse {
+      0%, 100% { box-shadow: 0 0 10px rgba(99, 102, 241, 0.3); }
+      50% { box-shadow: 0 0 25px rgba(99, 102, 241, 0.6); }
+    }
+
+    .timer-progress-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      height: 4px;
+      transition: width 1s linear;
+      border-radius: 0 2px 2px 0;
+    }
+
+    .quota-bar {
+      height: 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      overflow: hidden;
+    }
+
+    .quota-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+
+    .quota-fill-safe {
+      background: linear-gradient(90deg, #10b981, #059669);
+    }
+
+    .quota-fill-warning {
+      background: linear-gradient(90deg, #f59e0b, #d97706);
+    }
+
+    .quota-fill-danger {
+      background: linear-gradient(90deg, #ef4444, #dc2626);
+    }
+
+    .timer-display {
+      font-family: 'Space Mono', monospace;
+      font-size: 2rem;
+      font-weight: bold;
+      letter-spacing: 2px;
+    }
+
+    .mode-selector {
+      display: flex;
+      gap: 8px;
+    }
+
+    .mode-btn {
+      flex: 1;
+      padding: 10px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 12px;
+      transition: all 0.15s ease;
+      cursor: pointer;
+      border: 2px solid transparent;
+    }
+
+    .mode-btn:hover:not(.mode-active) {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .mode-active {
+      border-color: white;
+    }
+
+    .time-leak-warning {
+      animation: leakPulse 1s ease-in-out infinite;
+    }
+
+    @keyframes leakPulse {
+      0%, 100% { background-color: rgba(239, 68, 68, 0.2); }
+      50% { background-color: rgba(239, 68, 68, 0.4); }
+    }
   </style>
 </head>
 <body>
@@ -435,6 +524,19 @@
       DECENT: { name: 'DECENT', min: 70, icon: '✓', color: 'from-green-400 to-green-600', reward: 30 },
       STRUGGLING: { name: 'STRUGGLING', min: 55, icon: '⚠️', color: 'from-orange-400 to-red-500', penalty: 75 },
       CRISIS: { name: 'CRISIS', min: 0, icon: '🚨', color: 'from-rose-600 to-red-800', penalty: 200 }
+    };
+
+    // Screen Time Quota Configuration
+    const SCREEN_QUOTA = {
+      ENTERTAINMENT_DAILY_LIMIT: 90,  // minutes
+      TIME_LEAK_PENALTY: -5,          // points penalty for exceeding quota
+      EDUCATIONAL_CAREER_RATE: 30,    // minutes of educational content = 1 career point
+      SUNSET_HARD_STOP: '22:00'       // 10 PM - timer past this fails sunset on weekdays
+    };
+
+    const SCREEN_MODES = {
+      EDUCATIONAL: { id: 'educational', name: 'Educational/Informative', icon: '📚', color: 'from-emerald-500 to-teal-600' },
+      ENTERTAINMENT: { id: 'entertainment', name: 'Entertainment', icon: '📺', color: 'from-amber-500 to-orange-600' }
     };
 
     // ============================================================================
@@ -586,7 +688,14 @@
       isOffDay: false,
       isLocked: false,
       isFilled: false,
-      lastUpdated: null
+      lastUpdated: null,
+      // Screen Time Tracking
+      screenTime: {
+        educational: 0,     // minutes of educational content
+        entertainment: 0,   // minutes of entertainment content
+        sessions: []        // Array of { mode, startTime, endTime, duration }
+      },
+      sunsetAutoFailed: false  // True if timer was running past 10 PM
     });
 
     const createWeek = (startDate) => {
@@ -662,7 +771,12 @@
           score += calculateSleepPoints(day.sleepTime, isWeekend);
         } else if (habit.id === 'sunset') {
           // Digital Sunset: 1pt if locked by 10 PM
-          score += calculateSunsetPoints(day.sunsetTime, isWeekend);
+          // Auto-fail if timer was running past 10 PM (sunsetAutoFailed flag)
+          if (day.sunsetAutoFailed && !isWeekend) {
+            score += 0; // No points - auto-failed
+          } else {
+            score += calculateSunsetPoints(day.sunsetTime, isWeekend);
+          }
         } else if (habit.id === 'gym') {
           // Vital Rest Day: Auto-award 1pt if marked as rest day
           if (day.isVitalRest) {
@@ -676,7 +790,10 @@
           if (isMonday && week && !wasSundaySleepOnTime(week)) {
             careerPoints = Math.floor(careerPoints / 2);
           }
-          score += careerPoints;
+          // Educational screen time bonus: 1 career point per 30 min
+          const educationalMins = day.screenTime?.educational || 0;
+          const educationalBonus = Math.floor(educationalMins / SCREEN_QUOTA.EDUCATIONAL_CAREER_RATE);
+          score += careerPoints + educationalBonus;
         } else if (habit.isWeekly && week) {
           // Weekly habits: Only count points on the day it was completed
           // (avoid double-counting across the week)
@@ -689,6 +806,12 @@
           score += day.habits[habit.id] ?? 0;
         }
       });
+
+      // Screen Time Penalty: Time Leak if entertainment exceeds quota
+      const entertainmentMins = day.screenTime?.entertainment || 0;
+      if (entertainmentMins > SCREEN_QUOTA.ENTERTAINMENT_DAILY_LIMIT) {
+        score += SCREEN_QUOTA.TIME_LEAK_PENALTY; // -5 pts
+      }
 
       return score;
     };
@@ -816,6 +939,13 @@
       const [showConflictModal, setShowConflictModal] = useState(false);
       const [conflictData, setConflictData] = useState(null); // { local, remote }
 
+      // Screen Timer State
+      const [timerRunning, setTimerRunning] = useState(false);
+      const [timerMode, setTimerMode] = useState('entertainment'); // 'educational' or 'entertainment'
+      const [timerStartTime, setTimerStartTime] = useState(null);
+      const [timerElapsed, setTimerElapsed] = useState(0); // seconds
+      const [showTimerPanel, setShowTimerPanel] = useState(false);
+
       // Haptic feedback utility
       const triggerHaptic = (type = 'light') => {
         if ('vibrate' in navigator) {
@@ -843,6 +973,54 @@
         const interval = setInterval(checkSunsetWarning, 60000); // Check every minute
         return () => clearInterval(interval);
       }, []);
+
+      // Screen Timer - update elapsed time every second
+      useEffect(() => {
+        if (!timerRunning || !timerStartTime) return;
+
+        const interval = setInterval(() => {
+          const now = Date.now();
+          const elapsed = Math.floor((now - timerStartTime) / 1000);
+          setTimerElapsed(elapsed);
+
+          // Check for sunset hard-stop (10 PM on weekdays)
+          const currentTime = new Date();
+          const hours = currentTime.getHours();
+          const dayOfWeek = currentTime.getDay();
+          const isWeekday = dayOfWeek >= 0 && dayOfWeek <= 4; // Sun-Thu (before Fri/Sat)
+
+          if (isWeekday && hours >= 22 && state) {
+            // Auto-fail sunset and stop timer
+            handleTimerSunsetViolation();
+          }
+        }, 1000);
+
+        return () => clearInterval(interval);
+      }, [timerRunning, timerStartTime, state]);
+
+      // Handle sunset violation when timer runs past 10 PM
+      const handleTimerSunsetViolation = () => {
+        if (!state) return;
+
+        // Find today's day
+        const currentWeek = state.weeks[state.currentWeek];
+        const today = new Date();
+        const todayIdx = currentWeek.days.findIndex(d => isSameDay(new Date(d.date), today));
+
+        if (todayIdx === -1) return;
+
+        // Stop timer and record session
+        stopTimer(true); // true = sunset violation
+
+        // Mark sunset as auto-failed
+        const newState = JSON.parse(JSON.stringify(state));
+        newState.weeks[state.currentWeek].days[todayIdx].sunsetAutoFailed = true;
+        newState.weeks[state.currentWeek].days[todayIdx].sunsetTime = null; // Clear any manual entry
+        saveState(newState);
+
+        triggerHaptic('heavy');
+        alert('Digital Sunset FAILED - Timer was running past 10 PM!');
+      };
 
       // Touch handlers for swipe gestures
       const handleTouchStart = (e) => {
@@ -1356,6 +1534,102 @@
         saveState(newState);
       };
 
+      // ========== SCREEN TIMER FUNCTIONS ==========
+
+      // Start the screen timer
+      const startTimer = (mode) => {
+        setTimerMode(mode);
+        setTimerStartTime(Date.now());
+        setTimerElapsed(0);
+        setTimerRunning(true);
+        triggerHaptic('medium');
+      };
+
+      // Stop the screen timer and record the session
+      const stopTimer = (sunsetViolation = false) => {
+        if (!timerRunning || !timerStartTime) return;
+
+        const endTime = Date.now();
+        const durationMinutes = Math.floor((endTime - timerStartTime) / 60000);
+
+        if (durationMinutes > 0 && state) {
+          // Find today's day
+          const currentWeek = state.weeks[state.currentWeek];
+          const today = new Date();
+          const todayIdx = currentWeek.days.findIndex(d => isSameDay(new Date(d.date), today));
+
+          if (todayIdx !== -1) {
+            const newState = JSON.parse(JSON.stringify(state));
+            const day = newState.weeks[state.currentWeek].days[todayIdx];
+
+            // Initialize screenTime if missing (backward compat)
+            if (!day.screenTime) {
+              day.screenTime = { educational: 0, entertainment: 0, sessions: [] };
+            }
+
+            // Add to appropriate category
+            if (timerMode === 'educational') {
+              day.screenTime.educational = (day.screenTime.educational || 0) + durationMinutes;
+            } else {
+              day.screenTime.entertainment = (day.screenTime.entertainment || 0) + durationMinutes;
+            }
+
+            // Record session
+            day.screenTime.sessions = day.screenTime.sessions || [];
+            day.screenTime.sessions.push({
+              mode: timerMode,
+              startTime: new Date(timerStartTime).toISOString(),
+              endTime: new Date(endTime).toISOString(),
+              duration: durationMinutes,
+              sunsetViolation
+            });
+
+            day.isFilled = true;
+            day.lastUpdated = new Date().toISOString();
+
+            saveState(newState);
+          }
+        }
+
+        // Reset timer state
+        setTimerRunning(false);
+        setTimerStartTime(null);
+        setTimerElapsed(0);
+        triggerHaptic('sparkle');
+      };
+
+      // Format seconds to MM:SS or HH:MM:SS
+      const formatTimerDisplay = (seconds) => {
+        const hrs = Math.floor(seconds / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+
+        if (hrs > 0) {
+          return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      };
+
+      // Get today's screen time stats
+      const getTodayScreenTime = () => {
+        if (!state) return { educational: 0, entertainment: 0, quotaRemaining: 90, isOverQuota: false };
+
+        const currentWeek = state.weeks[state.currentWeek];
+        const today = new Date();
+        const todayDay = currentWeek.days.find(d => isSameDay(new Date(d.date), today));
+
+        if (!todayDay || !todayDay.screenTime) {
+          return { educational: 0, entertainment: 0, quotaRemaining: 90, isOverQuota: false };
+        }
+
+        const educational = todayDay.screenTime.educational || 0;
+        const entertainment = todayDay.screenTime.entertainment || 0;
+        const quotaRemaining = Math.max(0, SCREEN_QUOTA.ENTERTAINMENT_DAILY_LIMIT - entertainment);
+        const isOverQuota = entertainment > SCREEN_QUOTA.ENTERTAINMENT_DAILY_LIMIT;
+
+        return { educational, entertainment, quotaRemaining, isOverQuota };
+      };
+
       const switchViewMode = (mode) => {
         const newState = JSON.parse(JSON.stringify(state));
         newState.viewMode = mode;
@@ -1503,6 +1777,136 @@
                 <div className="text-3xl">~</div>
               </div>
             </div>
+
+            {/* Screen Time Quota Panel */}
+            {(() => {
+              const screenStats = getTodayScreenTime();
+              const quotaPercent = Math.min(100, (screenStats.entertainment / SCREEN_QUOTA.ENTERTAINMENT_DAILY_LIMIT) * 100);
+              const quotaClass = quotaPercent >= 100 ? 'quota-fill-danger' : quotaPercent >= 70 ? 'quota-fill-warning' : 'quota-fill-safe';
+
+              return (
+                <div className={`glass rounded-xl p-4 mb-6 animate-slide-in screen-timer ${timerRunning ? 'screen-timer-running' : ''} ${screenStats.isOverQuota ? 'time-leak-warning' : ''}`}>
+                  {/* Header - Click to expand */}
+                  <div
+                    className="flex items-center justify-between cursor-pointer"
+                    onClick={() => setShowTimerPanel(!showTimerPanel)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="text-2xl">{timerRunning ? (timerMode === 'educational' ? '📚' : '📺') : '⏱️'}</div>
+                      <div>
+                        <div className="text-sm font-semibold text-purple-300">
+                          {timerRunning ? `Timer Running (${timerMode === 'educational' ? 'Educational' : 'Entertainment'})` : 'Screen Time Quota'}
+                        </div>
+                        <div className="text-xs text-purple-400">
+                          {screenStats.entertainment} / {SCREEN_QUOTA.ENTERTAINMENT_DAILY_LIMIT} min entertainment
+                          {screenStats.isOverQuota && <span className="text-red-400 font-bold ml-2">TIME LEAK!</span>}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {timerRunning && (
+                        <div className="timer-display text-lg">
+                          {formatTimerDisplay(timerElapsed)}
+                        </div>
+                      )}
+                      <span className="text-purple-400 text-xl">{showTimerPanel ? '▼' : '▶'}</span>
+                    </div>
+                  </div>
+
+                  {/* Entertainment Quota Bar */}
+                  <div className="mt-3">
+                    <div className="quota-bar">
+                      <div
+                        className={`quota-fill ${quotaClass}`}
+                        style={{ width: `${quotaPercent}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between mt-1 text-[10px] text-purple-500">
+                      <span>{screenStats.quotaRemaining} min remaining</span>
+                      <span>{screenStats.educational} min educational today</span>
+                    </div>
+                  </div>
+
+                  {/* Expanded Timer Panel */}
+                  {showTimerPanel && (
+                    <div className="mt-4 pt-4 border-t border-purple-500/20">
+                      {!timerRunning ? (
+                        <>
+                          {/* Mode Selection */}
+                          <div className="text-xs text-purple-400 mb-2 font-semibold">Select Content Type:</div>
+                          <div className="mode-selector mb-4">
+                            <button
+                              onClick={() => startTimer('educational')}
+                              className={`mode-btn bg-gradient-to-r ${SCREEN_MODES.EDUCATIONAL.color} text-white`}
+                            >
+                              <div className="text-lg mb-1">{SCREEN_MODES.EDUCATIONAL.icon}</div>
+                              <div>Educational</div>
+                              <div className="text-[9px] opacity-75 mt-1">+Career pts</div>
+                            </button>
+                            <button
+                              onClick={() => startTimer('entertainment')}
+                              className={`mode-btn bg-gradient-to-r ${SCREEN_MODES.ENTERTAINMENT.color} text-white`}
+                            >
+                              <div className="text-lg mb-1">{SCREEN_MODES.ENTERTAINMENT.icon}</div>
+                              <div>Entertainment</div>
+                              <div className="text-[9px] opacity-75 mt-1">90 min quota</div>
+                            </button>
+                          </div>
+
+                          {/* Rules Summary */}
+                          <div className="text-[10px] text-purple-500 space-y-1">
+                            <div>• Educational time adds to Career Development</div>
+                            <div>• Entertainment limited to {SCREEN_QUOTA.ENTERTAINMENT_DAILY_LIMIT} min/day</div>
+                            <div>• Exceeding quota = {SCREEN_QUOTA.TIME_LEAK_PENALTY}pt penalty</div>
+                            <div>• Timer past 10 PM = Sunset FAILS (weekdays)</div>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          {/* Running Timer Display */}
+                          <div className="text-center mb-4">
+                            <div className="timer-display text-4xl mb-2">
+                              {formatTimerDisplay(timerElapsed)}
+                            </div>
+                            <div className={`text-sm font-semibold ${timerMode === 'educational' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                              {timerMode === 'educational' ? '📚 Educational Mode' : '📺 Entertainment Mode'}
+                            </div>
+                            {timerMode === 'entertainment' && (
+                              <div className="text-xs text-purple-400 mt-1">
+                                {Math.max(0, screenStats.quotaRemaining - Math.floor(timerElapsed / 60))} min quota remaining
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Stop Button */}
+                          <button
+                            onClick={() => stopTimer()}
+                            className="w-full py-3 rounded-xl font-bold bg-gradient-to-r from-red-500 to-rose-600 text-white hover:from-red-600 hover:to-rose-700 transition-all"
+                          >
+                            ⏹ Stop Timer
+                          </button>
+
+                          {/* Warning if approaching quota */}
+                          {timerMode === 'entertainment' && screenStats.quotaRemaining - Math.floor(timerElapsed / 60) <= 15 && (
+                            <div className="mt-3 text-center text-xs text-amber-400 animate-pulse">
+                              ⚠️ Approaching entertainment quota limit!
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Timer progress bar when running */}
+                  {timerRunning && timerMode === 'entertainment' && (
+                    <div
+                      className={`timer-progress-bar ${quotaPercent >= 100 ? 'bg-red-500' : 'bg-indigo-500'}`}
+                      style={{ width: `${Math.min(100, ((screenStats.entertainment + Math.floor(timerElapsed / 60)) / SCREEN_QUOTA.ENTERTAINMENT_DAILY_LIMIT) * 100)}%` }}
+                    />
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Tier Thresholds Info */}
             <div className="glass rounded-xl p-4 mb-6 animate-slide-in">
@@ -2876,6 +3280,35 @@ function doPost(e) {
               </div>
               <p className="text-[10px] text-purple-400 mt-2">
                 * Thresholds scale down if you take off-days (e.g., 5 active days = lower targets)
+              </p>
+            </div>
+
+            {/* Screen Time Quota */}
+            <div className="mb-6">
+              <h4 className="text-lg font-bold text-purple-300 mb-3">Screen Time Quota</h4>
+              <p className="text-sm text-purple-200 mb-3">
+                Track TV/screen time with the built-in timer. Two modes differentiate content types.
+              </p>
+              <div className="glass rounded-lg p-3 text-xs space-y-2">
+                <div className="flex justify-between items-center">
+                  <span>📚 Educational Mode</span>
+                  <span className="text-emerald-400">+1 Career pt per 30 min</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>📺 Entertainment Mode</span>
+                  <span className="text-amber-400">90 min daily quota</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>Exceeding entertainment quota</span>
+                  <span className="text-red-400 font-bold">-5 pts "Time Leak"</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>Timer past 10 PM (weekdays)</span>
+                  <span className="text-red-400 font-bold">Sunset auto-fails</span>
+                </div>
+              </div>
+              <p className="text-[10px] text-purple-400 mt-2">
+                * Use the timer to track all screen consumption. Educational content earns Career points!
               </p>
             </div>
 
