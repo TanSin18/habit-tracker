@@ -470,6 +470,128 @@
       0%, 100% { background-color: rgba(239, 68, 68, 0.2); }
       50% { background-color: rgba(239, 68, 68, 0.4); }
     }
+
+    /* Productivity Slider Styles */
+    .productivity-slider-container {
+      position: relative;
+      padding: 8px 0;
+    }
+
+    .productivity-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 12px;
+      border-radius: 6px;
+      outline: none;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .productivity-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: white;
+      cursor: pointer;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3), 0 0 0 4px rgba(255, 255, 255, 0.2);
+      transition: all 0.15s ease;
+    }
+
+    .productivity-slider::-webkit-slider-thumb:hover {
+      transform: scale(1.1);
+      box-shadow: 0 2px 15px rgba(0, 0, 0, 0.4), 0 0 0 6px rgba(255, 255, 255, 0.3);
+    }
+
+    .productivity-slider::-webkit-slider-thumb:active {
+      transform: scale(0.95);
+    }
+
+    .productivity-slider::-moz-range-thumb {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: white;
+      cursor: pointer;
+      border: none;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Slider track color variations */
+    .slider-level-0 {
+      background: linear-gradient(90deg, #dc2626, #991b1b);
+    }
+    .slider-level-1 {
+      background: linear-gradient(90deg, #f97316, #ea580c);
+    }
+    .slider-level-2 {
+      background: linear-gradient(90deg, #eab308, #ca8a04);
+    }
+    .slider-level-3 {
+      background: linear-gradient(90deg, #22c55e, #16a34a);
+    }
+    .slider-level-4 {
+      background: linear-gradient(90deg, #06b6d4, #0891b2, #d4af37);
+    }
+
+    .productivity-notches {
+      display: flex;
+      justify-content: space-between;
+      padding: 0 12px;
+      margin-top: 4px;
+    }
+
+    .productivity-notch {
+      width: 2px;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 1px;
+    }
+
+    .productivity-notch-active {
+      background: rgba(255, 255, 255, 0.8);
+      height: 10px;
+    }
+
+    .productivity-tier-label {
+      text-align: center;
+      margin-top: 12px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      transition: all 0.3s ease;
+    }
+
+    .tier-label-0 {
+      background: rgba(220, 38, 38, 0.2);
+      border: 1px solid rgba(220, 38, 38, 0.4);
+    }
+    .tier-label-1 {
+      background: rgba(249, 115, 22, 0.2);
+      border: 1px solid rgba(249, 115, 22, 0.4);
+    }
+    .tier-label-2 {
+      background: rgba(234, 179, 8, 0.2);
+      border: 1px solid rgba(234, 179, 8, 0.4);
+    }
+    .tier-label-3 {
+      background: rgba(34, 197, 94, 0.2);
+      border: 1px solid rgba(34, 197, 94, 0.4);
+    }
+    .tier-label-4 {
+      background: linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(212, 175, 55, 0.2));
+      border: 1px solid rgba(6, 182, 212, 0.4);
+    }
+
+    @keyframes flowPulse {
+      0%, 100% { box-shadow: 0 0 10px rgba(6, 182, 212, 0.3); }
+      50% { box-shadow: 0 0 25px rgba(212, 175, 55, 0.5); }
+    }
+
+    .flow-state-active {
+      animation: flowPulse 2s ease-in-out infinite;
+    }
   </style>
 </head>
 <body>
@@ -538,6 +660,50 @@
       EDUCATIONAL: { id: 'educational', name: 'Educational/Informative', icon: '📚', color: 'from-emerald-500 to-teal-600' },
       ENTERTAINMENT: { id: 'entertainment', name: 'Entertainment', icon: '📺', color: 'from-amber-500 to-orange-600' }
     };
+
+    // Productivity Scale: Cognitive Throughput Rating (0-4)
+    const PRODUCTIVITY_TIERS = [
+      {
+        level: 0,
+        name: 'System Failure',
+        description: 'No meaningful work done (illness or total procrastination)',
+        points: 0,
+        color: 'text-red-400',
+        icon: '🔴'
+      },
+      {
+        level: 1,
+        name: 'Maintenance',
+        description: 'Shallow work only: emails, meetings, admin tasks',
+        points: 1,
+        color: 'text-orange-400',
+        icon: '🟠'
+      },
+      {
+        level: 2,
+        name: 'Functional',
+        description: 'Standard output: tickets, some coding, basic analysis',
+        points: 2,
+        color: 'text-yellow-400',
+        icon: '🟡'
+      },
+      {
+        level: 3,
+        name: 'Power State',
+        description: 'Deep work: architecting models, complex SQL/Python',
+        points: 3,
+        color: 'text-green-400',
+        icon: '🟢'
+      },
+      {
+        level: 4,
+        name: 'Flow State',
+        description: 'Exceptional output: major blockers solved, zero distractions',
+        points: 4,
+        color: 'text-cyan-400',
+        icon: '💎'
+      }
+    ];
 
     // ============================================================================
     // UTILITY FUNCTIONS
@@ -695,7 +861,9 @@
         entertainment: 0,   // minutes of entertainment content
         sessions: []        // Array of { mode, startTime, endTime, duration }
       },
-      sunsetAutoFailed: false  // True if timer was running past 10 PM
+      sunsetAutoFailed: false,  // True if timer was running past 10 PM
+      // Productivity Rating (Cognitive Throughput)
+      productivityRating: null  // 0-4 scale, null = not rated yet
     });
 
     const createWeek = (startDate) => {
@@ -811,6 +979,11 @@
       const entertainmentMins = day.screenTime?.entertainment || 0;
       if (entertainmentMins > SCREEN_QUOTA.ENTERTAINMENT_DAILY_LIMIT) {
         score += SCREEN_QUOTA.TIME_LEAK_PENALTY; // -5 pts
+      }
+
+      // Productivity Rating: Cognitive Throughput bonus
+      if (day.productivityRating !== null && day.productivityRating !== undefined) {
+        score += PRODUCTIVITY_TIERS[day.productivityRating].points;
       }
 
       return score;
@@ -1427,6 +1600,28 @@
 
         const newState = JSON.parse(JSON.stringify(state));
         newState.weeks[state.currentWeek].days[dayIndex].sunsetTime = time;
+        newState.weeks[state.currentWeek].days[dayIndex].isFilled = true;
+        newState.weeks[state.currentWeek].days[dayIndex].lastUpdated = new Date().toISOString();
+
+        saveState(newState);
+      };
+
+      const updateProductivityRating = (dayIndex, rating) => {
+        const day = currentWeek.days[dayIndex];
+        if (day.isLocked || day.isOffDay) return;
+
+        // Haptic feedback at each notch
+        const tier = PRODUCTIVITY_TIERS[rating];
+        if (rating === 4) {
+          triggerHaptic('sparkle'); // Special for Flow State
+        } else if (rating >= 3) {
+          triggerHaptic('medium');
+        } else {
+          triggerHaptic('light');
+        }
+
+        const newState = JSON.parse(JSON.stringify(state));
+        newState.weeks[state.currentWeek].days[dayIndex].productivityRating = rating;
         newState.weeks[state.currentWeek].days[dayIndex].isFilled = true;
         newState.weeks[state.currentWeek].days[dayIndex].lastUpdated = new Date().toISOString();
 
@@ -2162,6 +2357,70 @@
                         );
                       })}
 
+                      {/* Productivity Rating Row */}
+                      <tr className="matrix-habit-row">
+                        <td className="matrix-cell matrix-habit-name">
+                          <span className="tier-marker tier-marker-4" />
+                          <span className="habit-icon mr-1">🧠</span>
+                          <span>Productivity</span>
+                        </td>
+                        {currentWeek.days.map((day, dayIdx) => {
+                          const isToday = isSameDay(new Date(day.date), new Date());
+                          const isFuture = isFutureDay(day.date);
+
+                          if (day.isOffDay) {
+                            return (
+                              <td key={dayIdx} className={`matrix-cell matrix-off-day ${isToday ? 'matrix-today-col' : ''}`}>
+                                -
+                              </td>
+                            );
+                          }
+
+                          if (isFuture) {
+                            return (
+                              <td key={dayIdx} className={`matrix-cell matrix-future ${isToday ? 'matrix-today-col' : ''}`}>
+                                -
+                              </td>
+                            );
+                          }
+
+                          const rating = day.productivityRating;
+                          const hasRating = rating !== null && rating !== undefined;
+                          const tier = hasRating ? PRODUCTIVITY_TIERS[rating] : null;
+
+                          let cellClass = 'matrix-score-zero';
+                          if (hasRating) {
+                            if (rating >= 4) cellClass = 'matrix-score-full';
+                            else if (rating >= 3) cellClass = 'matrix-score-full';
+                            else if (rating >= 2) cellClass = 'matrix-score-partial';
+                            else if (rating >= 1) cellClass = 'matrix-score-partial';
+                            else cellClass = 'matrix-score-negative';
+                          }
+
+                          return (
+                            <td
+                              key={dayIdx}
+                              className={`matrix-cell ${cellClass} ${isToday ? 'matrix-today-col' : ''}`}
+                              title={hasRating ? `${tier.name}: ${tier.points} pts` : 'Not rated'}
+                            >
+                              {hasRating ? (rating === 4 ? '💎' : `+${tier.points}`) : '-'}
+                            </td>
+                          );
+                        })}
+                        <td className="matrix-cell matrix-total-row">
+                          {(() => {
+                            let total = 0;
+                            currentWeek.days.forEach(day => {
+                              if (day.isOffDay || isFutureDay(day.date)) return;
+                              if (day.productivityRating !== null && day.productivityRating !== undefined) {
+                                total += PRODUCTIVITY_TIERS[day.productivityRating].points;
+                              }
+                            });
+                            return total;
+                          })()}
+                        </td>
+                      </tr>
+
                       {/* Daily Totals Row */}
                       <tr className="matrix-total-row">
                         <td className="matrix-cell matrix-habit-name font-bold">
@@ -2677,6 +2936,63 @@
                             </div>
                           );
                         })()}
+
+                        {/* Productivity Rating Slider */}
+                        <div className={`glass rounded-xl p-4 mb-4 ${day.productivityRating === 4 ? 'flow-state-active' : ''}`}>
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="text-sm font-semibold text-purple-300">
+                              Cognitive Throughput
+                            </div>
+                            <div className="text-xs text-purple-400 mono">
+                              {day.productivityRating !== null && day.productivityRating !== undefined
+                                ? `+${PRODUCTIVITY_TIERS[day.productivityRating].points} pts`
+                                : 'Not rated'}
+                            </div>
+                          </div>
+
+                          {/* Slider */}
+                          <div className="productivity-slider-container">
+                            <input
+                              type="range"
+                              min="0"
+                              max="4"
+                              step="1"
+                              value={day.productivityRating ?? 2}
+                              onChange={(e) => {
+                                if (!day.isLocked) {
+                                  updateProductivityRating(actualDayIndex, parseInt(e.target.value));
+                                }
+                              }}
+                              disabled={day.isLocked}
+                              className={`productivity-slider slider-level-${day.productivityRating ?? 2} ${day.isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            />
+                            {/* Notches */}
+                            <div className="productivity-notches">
+                              {[0, 1, 2, 3, 4].map(n => (
+                                <div
+                                  key={n}
+                                  className={`productivity-notch ${(day.productivityRating ?? 2) === n ? 'productivity-notch-active' : ''}`}
+                                />
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Tier Label */}
+                          {(() => {
+                            const rating = day.productivityRating ?? 2;
+                            const tier = PRODUCTIVITY_TIERS[rating];
+                            return (
+                              <div className={`productivity-tier-label tier-label-${rating}`}>
+                                <div className={`text-sm font-bold ${tier.color}`}>
+                                  {tier.icon} Tier {rating}: {tier.name}
+                                </div>
+                                <div className="text-[10px] text-purple-300 mt-1">
+                                  {tier.description}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
 
                         {/* Day Controls */}
                         <div className="flex gap-2">
@@ -3309,6 +3625,39 @@ function doPost(e) {
               </div>
               <p className="text-[10px] text-purple-400 mt-2">
                 * Use the timer to track all screen consumption. Educational content earns Career points!
+              </p>
+            </div>
+
+            {/* Productivity Rating */}
+            <div className="mb-6">
+              <h4 className="text-lg font-bold text-purple-300 mb-3">Cognitive Throughput</h4>
+              <p className="text-sm text-purple-200 mb-3">
+                Rate your daily work output for regression analysis. Slide to set your tier.
+              </p>
+              <div className="glass rounded-lg p-3 text-xs space-y-2">
+                <div className="flex justify-between items-center">
+                  <span>🔴 0: System Failure</span>
+                  <span className="text-red-400">0 pts</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>🟠 1: Maintenance</span>
+                  <span className="text-orange-400">1 pt</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>🟡 2: Functional</span>
+                  <span className="text-yellow-400">2 pts</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>🟢 3: Power State</span>
+                  <span className="text-green-400">3 pts</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>💎 4: Flow State</span>
+                  <span className="text-cyan-400">4 pts</span>
+                </div>
+              </div>
+              <p className="text-[10px] text-purple-400 mt-2">
+                * This data syncs to Google Sheets for correlation analysis with other habits.
               </p>
             </div>
 
