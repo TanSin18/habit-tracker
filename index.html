@@ -985,7 +985,7 @@
       const toggleHabit = (dayIndex, habitId) => {
         const day = currentWeek.days[dayIndex];
         if (day.isLocked || day.isOffDay) return;
-        if (habitId === 'reading' || habitId === 'sleep' || habitId === 'sunset' || habitId === 'weight') return; // These use separate inputs
+        if (habitId === 'reading' || habitId === 'sleep' || habitId === 'sunset') return; // These use separate inputs
 
         const habit = HABITS.find(h => h.id === habitId);
         const currentValue = day.habits[habitId];
