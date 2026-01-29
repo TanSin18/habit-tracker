@@ -45,6 +45,15 @@
       50% { opacity: 0.8; }
     }
 
+    @keyframes pulse-red {
+      0%, 100% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.4); }
+      50% { box-shadow: 0 0 40px rgba(239, 68, 68, 0.8); }
+    }
+
+    .animate-pulse-red {
+      animation: pulse-red 1.5s ease-in-out infinite;
+    }
+
     .animate-slide-in {
       animation: slideIn 0.3s ease-out;
     }
@@ -152,10 +161,12 @@
         laundry: 0, dishes: 0, cleaning: 0, meditation: 0,
         prayer: 0, sleep: 0, journal: 0, reading: 0, career: 0
       },
+      pagesRead: 0,
       completedTasks: [],
       isOffDay: false,
       isLocked: false,
-      isFilled: false
+      isFilled: false,
+      lastUpdated: null
     });
 
     const createWeek = (startDate) => {
@@ -211,14 +222,28 @@
     // SCORING LOGIC
     // ============================================================================
 
-    const calculateDailyScore = (day, tasks) => {
+    // Calculate core habit score (excludes bonus tasks)
+    const calculateCoreScore = (day) => {
       if (day.isOffDay) return 0;
 
       let score = 0;
       HABITS.forEach(habit => {
-        score += day.habits[habit.id];
+        if (habit.id === 'reading') {
+          // Quantitative reading: 1pt per 20 pages
+          score += Math.floor((day.pagesRead || 0) / 20);
+        } else {
+          score += day.habits[habit.id];
+        }
       });
 
+      return score;
+    };
+
+    // Calculate bonus task score
+    const calculateBonusScore = (day, tasks) => {
+      if (day.isOffDay) return 0;
+
+      let score = 0;
       day.completedTasks.forEach(taskId => {
         const task = tasks.find(t => t.id === taskId);
         if (task) score += task.points;
@@ -227,10 +252,24 @@
       return score;
     };
 
+    const calculateDailyScore = (day, tasks) => {
+      return calculateCoreScore(day) + calculateBonusScore(day, tasks);
+    };
+
     const calculateWeekStats = (week, tasks, streakDays) => {
+      const activeDaysCount = week.days.filter(d => !d.isOffDay).length;
+      const activeRatio = activeDaysCount / 7;
+
+      // Calculate core and bonus scores separately
+      const dailyCoreScores = week.days.map(day => calculateCoreScore(day));
+      const dailyBonusScores = week.days.map(day => calculateBonusScore(day, tasks));
       const dailyScores = week.days.map(day => calculateDailyScore(day, tasks));
+
+      const weeklyCoreScore = dailyCoreScores.reduce((sum, s) => sum + s, 0);
+      const weeklyBonusScore = dailyBonusScores.reduce((sum, s) => sum + s, 0);
       const weeklyRawScore = dailyScores.reduce((sum, s) => sum + s, 0);
 
+      // Proportional meal slack: 20% of total possible meals for active days
       let mealsSkipped = 0;
       week.days.forEach(day => {
         if (!day.isOffDay) {
@@ -239,7 +278,8 @@
         }
       });
 
-      const extraMealsSkipped = Math.max(0, mealsSkipped - 3);
+      const freeMealAllowance = Math.floor((activeDaysCount * 2) * 0.2); // 20% slack
+      const extraMealsSkipped = Math.max(0, mealsSkipped - freeMealAllowance);
       const mealPenalty = extraMealsSkipped * 2;
 
       const baseScore = weeklyRawScore - mealPenalty;
@@ -252,21 +292,45 @@
 
       const totalScore = baseScore + streakBonus;
 
+      // Dynamic tier thresholds based on active days
+      const dynamicThresholds = {
+        elite: Math.round(94 * activeRatio),
+        solid: Math.round(83 * activeRatio),
+        decent: Math.round(70 * activeRatio),
+        struggling: Math.round(55 * activeRatio)
+      };
+
+      // Core score threshold for bonus eligibility (60% of core max)
+      const maxCoreScore = activeDaysCount * 19; // Max possible core score per day
+      const coreThreshold = maxCoreScore * 0.6;
+      const bonusEligible = weeklyCoreScore >= coreThreshold;
+
+      // Calculate effective score: bonus only counts if core threshold met
+      const effectiveScore = bonusEligible ? totalScore : (totalScore - weeklyBonusScore);
+
       let tier = TIERS.CRISIS;
-      if (totalScore >= 94) tier = TIERS.ELITE;
-      else if (totalScore >= 83) tier = TIERS.SOLID;
-      else if (totalScore >= 70) tier = TIERS.DECENT;
-      else if (totalScore >= 55) tier = TIERS.STRUGGLING;
+      if (effectiveScore >= dynamicThresholds.elite) tier = TIERS.ELITE;
+      else if (effectiveScore >= dynamicThresholds.solid) tier = TIERS.SOLID;
+      else if (effectiveScore >= dynamicThresholds.decent) tier = TIERS.DECENT;
+      else if (effectiveScore >= dynamicThresholds.struggling) tier = TIERS.STRUGGLING;
 
       return {
         dailyScores,
+        weeklyCoreScore,
+        weeklyBonusScore,
         weeklyRawScore,
         mealsSkipped,
+        freeMealAllowance,
         mealPenalty,
         baseScore,
         streakBonus,
         totalScore,
-        tier
+        effectiveScore,
+        tier,
+        dynamicThresholds,
+        activeDaysCount,
+        bonusEligible,
+        coreThreshold
       };
     };
 
@@ -325,6 +389,7 @@
       const toggleHabit = (dayIndex, habitId) => {
         const day = currentWeek.days[dayIndex];
         if (day.isLocked || day.isOffDay) return;
+        if (habitId === 'reading') return; // Reading uses separate input
 
         const habit = HABITS.find(h => h.id === habitId);
         const currentValue = day.habits[habitId];
@@ -333,6 +398,7 @@
         const newState = JSON.parse(JSON.stringify(state));
         newState.weeks[state.currentWeek].days[dayIndex].habits[habitId] = newValue;
         newState.weeks[state.currentWeek].days[dayIndex].isFilled = true;
+        newState.weeks[state.currentWeek].days[dayIndex].lastUpdated = new Date().toISOString();
 
         if (habitId === 'nofap') {
           if (newValue === 3) {
@@ -346,6 +412,27 @@
         }
 
         saveState(newState);
+      };
+
+      const updateReading = (dayIndex, pages) => {
+        const day = currentWeek.days[dayIndex];
+        if (day.isLocked || day.isOffDay) return;
+
+        const newState = JSON.parse(JSON.stringify(state));
+        newState.weeks[state.currentWeek].days[dayIndex].pagesRead = Math.max(0, parseInt(pages) || 0);
+        newState.weeks[state.currentWeek].days[dayIndex].isFilled = true;
+        newState.weeks[state.currentWeek].days[dayIndex].lastUpdated = new Date().toISOString();
+
+        saveState(newState);
+      };
+
+      // Check if a day was backfilled (updated more than 24h after the day's date)
+      const isBackfilled = (day) => {
+        if (!day.lastUpdated) return false;
+        const dayDate = new Date(day.date);
+        const updateDate = new Date(day.lastUpdated);
+        const hoursDiff = (updateDate - dayDate) / (1000 * 60 * 60);
+        return hoursDiff > 24;
       };
 
       const toggleOffDay = (dayIndex) => {
@@ -437,7 +524,16 @@
             {/* Stats Cards */}
             <div className="grid grid-cols-3 gap-3 mb-6 animate-slide-in">
               <div className="glass rounded-xl p-4 text-center">
-                <div className="text-2xl mb-1 animate-flicker">*</div>
+                {/* Streak flame with color progression */}
+                <div className={`text-2xl mb-1 animate-flicker ${
+                  state.streakDays >= 30 ? 'text-blue-400' :
+                  state.streakDays >= 14 ? 'text-orange-400' :
+                  'text-white'
+                }`}>
+                  <svg className="w-8 h-8 mx-auto" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 23c-4.97 0-9-3.58-9-8 0-3.07 2.31-5.64 5.5-7.27.5-.25 1.04.21.87.75-.35 1.1-.37 2.33.12 3.52.39.94 1.01 1.73 1.76 2.32.35.27.87.12 1.02-.3.47-1.3 1.33-2.3 2.48-2.87.45-.23.96.12.93.62-.07 1.12.19 2.08.78 2.88.36.48.88.86 1.46 1.1.38.15.81-.08.9-.48.4-1.76 1.58-3.15 3.18-3.77.52-.2 1.04.26.91.79C21.13 16.61 17.13 23 12 23z"/>
+                  </svg>
+                </div>
                 <div className="text-2xl font-bold">{state.streakDays}</div>
                 <div className="text-xs text-purple-300 mono">STREAK</div>
                 <div className="text-xs text-purple-400 mt-1">Best: {state.longestStreak}</div>
@@ -445,16 +541,23 @@
 
               <div className="glass rounded-xl p-4 text-center">
                 <div className="text-2xl mb-1">{stats.tier.icon}</div>
-                <div className="text-lg font-bold">{stats.totalScore}</div>
+                <div className="text-lg font-bold">{stats.effectiveScore}</div>
                 <div className="text-xs text-purple-300 mono">POINTS</div>
                 <div className="text-xs text-purple-400 mt-1">{stats.tier.name}</div>
+                {!stats.bonusEligible && stats.weeklyBonusScore > 0 && (
+                  <div className="text-[10px] text-amber-400 mt-1">+{stats.weeklyBonusScore} pending</div>
+                )}
               </div>
 
-              <div className="glass rounded-xl p-4 text-center">
+              <div className={`glass rounded-xl p-4 text-center ${
+                stats.tier.penalty ? 'animate-pulse-red' : ''
+              }`}>
                 <div className="text-2xl mb-1">$</div>
                 <div className="text-lg font-bold mono">${state.guiltFreeBalance}</div>
                 <div className="text-xs text-purple-300 mono">EARNED</div>
-                <div className="text-xs text-red-400 mt-1">Penalty: ${state.nreBalance}</div>
+                {state.nreBalance > 0 && (
+                  <div className="text-xs text-red-400 mt-1 font-bold">NRE: ${state.nreBalance}</div>
+                )}
               </div>
             </div>
 
@@ -464,19 +567,45 @@
                 <div>
                   <div className="text-sm font-semibold text-purple-300">Meal Flexibility</div>
                   <div className="text-xs text-purple-400 mt-1">
-                    {stats.mealsSkipped}/3 free skips used
+                    {stats.mealsSkipped}/{stats.freeMealAllowance} free skips used
                     {stats.mealPenalty > 0 && <span className="text-red-400"> • -{stats.mealPenalty}pts penalty</span>}
+                  </div>
+                  <div className="text-[10px] text-purple-500 mt-1">
+                    20% of {stats.activeDaysCount * 2} meals ({stats.activeDaysCount} active days)
                   </div>
                 </div>
                 <div className="text-3xl">~</div>
               </div>
             </div>
 
+            {/* Tier Thresholds Info */}
+            <div className="glass rounded-xl p-4 mb-6 animate-slide-in">
+              <div className="text-sm font-semibold text-purple-300 mb-2">Dynamic Targets ({stats.activeDaysCount}/7 days active)</div>
+              <div className="grid grid-cols-4 gap-2 text-xs">
+                <div className="text-center">
+                  <div className="text-yellow-400 font-bold">{stats.dynamicThresholds.elite}+</div>
+                  <div className="text-purple-400">Elite</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-blue-400 font-bold">{stats.dynamicThresholds.solid}+</div>
+                  <div className="text-purple-400">Solid</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-green-400 font-bold">{stats.dynamicThresholds.decent}+</div>
+                  <div className="text-purple-400">Decent</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-orange-400 font-bold">{stats.dynamicThresholds.struggling}+</div>
+                  <div className="text-purple-400">Struggle</div>
+                </div>
+              </div>
+            </div>
+
             {/* Reward/Penalty Card */}
-            <div className={`rounded-xl p-6 mb-6 animate-slide-in glow ${
+            <div className={`rounded-xl p-6 mb-6 animate-slide-in ${
               stats.tier.reward
-                ? 'bg-gradient-to-br from-green-500 to-emerald-600'
-                : 'bg-gradient-to-br from-red-500 to-red-700'
+                ? 'bg-gradient-to-br from-green-500 to-emerald-600 glow'
+                : 'bg-gradient-to-br from-red-500 to-red-700 animate-pulse-red'
             }`}>
               <div className="text-center">
                 <div className="text-sm font-semibold mb-2 opacity-90">
@@ -491,8 +620,13 @@
                     : `-> NRE Account (Locked)`}
                 </div>
                 <div className="text-xs mt-3 opacity-75">
-                  Need {stats.tier.reward ? '70+' : stats.tier.name === 'STRUGGLING' ? '55+' : '70+'} points to {stats.tier.reward ? 'maintain' : 'avoid penalty'}
+                  Need {stats.dynamicThresholds.decent}+ points to avoid penalty
                 </div>
+                {!stats.bonusEligible && stats.weeklyBonusScore > 0 && (
+                  <div className="text-xs mt-2 bg-black/20 rounded px-2 py-1 inline-block">
+                    Core: {stats.weeklyCoreScore}/{Math.round(stats.coreThreshold)} needed for bonus eligibility
+                  </div>
+                )}
               </div>
             </div>
 
@@ -534,6 +668,8 @@
 
                 const dayScore = calculateDailyScore(day, state.adHocTasks);
 
+                const wasBackfilled = isBackfilled(day);
+
                 let badge = null;
                 let badgeColor = '';
                 if (isFuture) {
@@ -546,11 +682,11 @@
                   badge = 'Missing Data';
                   badgeColor = 'text-amber-400';
                 } else if (day.isLocked) {
-                  badge = 'Locked';
+                  badge = wasBackfilled ? 'Locked (Backfilled)' : 'Locked';
                   badgeColor = 'text-blue-400';
                 } else if (day.isFilled) {
-                  badge = 'Filled';
-                  badgeColor = 'text-green-400';
+                  badge = wasBackfilled ? 'Backfilled' : 'Filled';
+                  badgeColor = wasBackfilled ? 'text-amber-300' : 'text-green-400';
                 }
 
                 return (
@@ -582,8 +718,47 @@
                         {/* Habits Grid */}
                         <div className="grid grid-cols-2 gap-2 mb-4">
                           {HABITS.map(habit => {
-                            const isComplete = day.habits[habit.id] === habit.points;
                             const isDisabled = day.isLocked;
+
+                            // Special handling for reading (quantitative input)
+                            if (habit.id === 'reading') {
+                              const pagesRead = day.pagesRead || 0;
+                              const readingPoints = Math.floor(pagesRead / 20);
+                              const isComplete = pagesRead >= 20;
+
+                              return (
+                                <div
+                                  key={habit.id}
+                                  className={`p-3 rounded-lg font-semibold text-sm flex items-center justify-between ${
+                                    isDisabled
+                                      ? 'opacity-50 bg-gray-700'
+                                      : isComplete
+                                      ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white'
+                                      : 'bg-white/5 text-purple-300'
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <span className="text-lg">{habit.icon}</span>
+                                    <span className="text-xs">{habit.name}</span>
+                                  </span>
+                                  <div className="flex flex-col items-end">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="5"
+                                      className="w-14 bg-white/20 text-center rounded text-xs p-1 text-white"
+                                      value={pagesRead}
+                                      onChange={(e) => updateReading(actualDayIndex, e.target.value)}
+                                      disabled={isDisabled}
+                                      placeholder="pgs"
+                                    />
+                                    <span className="text-[10px] mono opacity-75 mt-1">+{readingPoints}pt</span>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            const isComplete = day.habits[habit.id] === habit.points;
 
                             return (
                               <button
@@ -610,38 +785,50 @@
                           })}
                         </div>
 
-                        {/* Ad-hoc Tasks */}
-                        {state.adHocTasks.length > 0 && (
-                          <div className="space-y-2 mb-4">
-                            {state.adHocTasks.map(task => {
-                              const isComplete = day.completedTasks.includes(task.id);
-                              const isDisabled = day.isLocked;
+                        {/* Ad-hoc Tasks (Ephemeral filtering) */}
+                        {(() => {
+                          // Filter tasks: hide if completed on a previous day
+                          const tasksForThisDay = state.adHocTasks.filter(task => {
+                            const completedEarlier = currentWeek.days.some((d, idx) =>
+                              idx < actualDayIndex && d.completedTasks.includes(task.id)
+                            );
+                            return !completedEarlier;
+                          });
 
-                              return (
-                                <button
-                                  key={task.id}
-                                  onClick={() => toggleTask(actualDayIndex, task.id)}
-                                  disabled={isDisabled}
-                                  className={`habit-btn w-full p-3 rounded-lg font-semibold text-sm flex items-center justify-between ${
-                                    isDisabled
-                                      ? 'opacity-50 cursor-not-allowed bg-gray-700'
-                                      : isComplete
-                                      ? 'bg-gradient-to-r from-yellow-500 to-orange-600 text-white'
-                                      : 'bg-white/5 hover:bg-white/10 text-purple-300'
-                                  }`}
-                                >
-                                  <span className="flex items-center gap-2">
-                                    <span className="text-lg">*</span>
-                                    <span className="text-xs">{task.name}</span>
-                                  </span>
-                                  <span className="text-xs mono opacity-75">
-                                    {isComplete ? task.points : 0}/{task.points}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
+                          if (tasksForThisDay.length === 0) return null;
+
+                          return (
+                            <div className="space-y-2 mb-4">
+                              {tasksForThisDay.map(task => {
+                                const isComplete = day.completedTasks.includes(task.id);
+                                const isDisabled = day.isLocked;
+
+                                return (
+                                  <button
+                                    key={task.id}
+                                    onClick={() => toggleTask(actualDayIndex, task.id)}
+                                    disabled={isDisabled}
+                                    className={`habit-btn w-full p-3 rounded-lg font-semibold text-sm flex items-center justify-between ${
+                                      isDisabled
+                                        ? 'opacity-50 cursor-not-allowed bg-gray-700'
+                                        : isComplete
+                                        ? 'bg-gradient-to-r from-yellow-500 to-orange-600 text-white'
+                                        : 'bg-white/5 hover:bg-white/10 text-purple-300'
+                                    }`}
+                                  >
+                                    <span className="flex items-center gap-2">
+                                      <span className="text-lg">*</span>
+                                      <span className="text-xs">{task.name}</span>
+                                    </span>
+                                    <span className="text-xs mono opacity-75">
+                                      {isComplete ? task.points : 0}/{task.points}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
 
                         {/* Day Controls */}
                         <div className="flex gap-2">
