@@ -109,7 +109,8 @@
       { id: 'cleaning', name: 'Cleaning', icon: '🧹', points: 1 },
       { id: 'meditation', name: 'Meditation', icon: '🧘‍♂️', points: 1 },
       { id: 'prayer', name: 'Hanuman Chalisa', icon: '🙏', points: 1 },
-      { id: 'sleep', name: 'Sleep on Time', icon: '😴', points: 1 },
+      { id: 'sunset', name: 'Digital Sunset', icon: '📵', points: 1, isTime: true }, // 10:00 PM device lockdown
+      { id: 'sleep', name: 'Sleep', icon: '😴', points: 2, isTime: true }, // Variable: -1 to +2 pts
       { id: 'journal', name: 'Journaling', icon: '📝', points: 1 },
       { id: 'reading', name: 'Reading', icon: '📚', points: 2 },
       { id: 'career', name: 'Career Dev', icon: '🚀', points: 1 }
@@ -154,14 +155,73 @@
       return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
     };
 
+    // Check if a day is Friday or Saturday (weekend buffer days)
+    const isWeekendDay = (dateStr) => {
+      const date = new Date(dateStr);
+      const day = date.getDay();
+      return day === 5 || day === 6; // Friday = 5, Saturday = 6
+    };
+
+    // Check if a day is Sunday
+    const isSunday = (dateStr) => {
+      const date = new Date(dateStr);
+      return date.getDay() === 0;
+    };
+
+    // Calculate sleep points based on time (Sleep Velocity)
+    // 10:30 PM = +2 (Elite), 11:00 PM = +1 (Goal), 11:30 PM = 0, 12:30 AM+ = -1 (Penalty)
+    const calculateSleepPoints = (sleepTimeStr, isWeekend) => {
+      if (!sleepTimeStr) return 0;
+      if (isWeekend) return 1; // Flat reward for Friday/Saturday (Free-Roam)
+
+      const [hours, minutes] = sleepTimeStr.split(':').map(Number);
+      // Convert to minutes from midnight, handling late night (after midnight)
+      let totalMinutes = hours * 60 + minutes;
+      // If time is between 00:00-06:00, treat as late night (add 24h worth)
+      if (hours < 6) totalMinutes += 24 * 60;
+
+      // 22:30 (10:30 PM) = 1350 mins, 23:00 (11:00 PM) = 1380 mins
+      // 23:30 (11:30 PM) = 1410 mins, 00:30 (12:30 AM) = 1470 mins
+      if (totalMinutes <= 1350) return 2;  // Elite: 10:30 PM or earlier
+      if (totalMinutes <= 1380) return 1;  // Goal: 11:00 PM or earlier
+      if (totalMinutes <= 1410) return 0;  // Baseline: 11:30 PM
+      if (totalMinutes >= 1470) return -1; // Penalty: 12:30 AM or later
+      return 0;
+    };
+
+    // Calculate sunset points (Digital Sunset by 10:00 PM)
+    const calculateSunsetPoints = (sunsetTimeStr, isWeekend) => {
+      if (!sunsetTimeStr) return 0;
+      if (isWeekend) return 1; // Auto-point for weekend
+
+      const [hours, minutes] = sunsetTimeStr.split(':').map(Number);
+      let totalMinutes = hours * 60 + minutes;
+      if (hours < 6) totalMinutes += 24 * 60;
+
+      // 22:00 (10:00 PM) = 1320 mins
+      return totalMinutes <= 1320 ? 1 : 0;
+    };
+
+    // Check if Sunday sleep was on time (for Monday career penalty)
+    const wasSundaySleepOnTime = (week) => {
+      // Find Sunday in the week (day index where getDay() === 0)
+      const sundayDay = week.days.find(d => isSunday(d.date));
+      if (!sundayDay || !sundayDay.sleepTime) return true; // Default to true if no data
+
+      const sleepPoints = calculateSleepPoints(sundayDay.sleepTime, false);
+      return sleepPoints >= 1; // Must be at goal (11:00 PM) or better
+    };
+
     const createEmptyDay = (date) => ({
       date: date.toISOString(),
       habits: {
         nofap: 0, gym: 0, yoga: 0, lunch: 0, dinner: 0,
         laundry: 0, dishes: 0, cleaning: 0, meditation: 0,
-        prayer: 0, sleep: 0, journal: 0, reading: 0, career: 0
+        prayer: 0, sunset: 0, sleep: 0, journal: 0, reading: 0, career: 0
       },
       pagesRead: 0,
+      sleepTime: null,      // Store actual sleep time (HH:MM format)
+      sunsetTime: null,     // Store sunset/device lockdown time
       completedTasks: [],
       isOffDay: false,
       isLocked: false,
@@ -223,14 +283,31 @@
     // ============================================================================
 
     // Calculate core habit score (excludes bonus tasks)
-    const calculateCoreScore = (day) => {
+    // Now accepts week for Sunday Reset clause
+    const calculateCoreScore = (day, week = null) => {
       if (day.isOffDay) return 0;
+
+      const isWeekend = isWeekendDay(day.date);
+      const isMonday = new Date(day.date).getDay() === 1;
 
       let score = 0;
       HABITS.forEach(habit => {
         if (habit.id === 'reading') {
           // Quantitative reading: 1pt per 20 pages
           score += Math.floor((day.pagesRead || 0) / 20);
+        } else if (habit.id === 'sleep') {
+          // Sleep Velocity: Variable points based on time
+          score += calculateSleepPoints(day.sleepTime, isWeekend);
+        } else if (habit.id === 'sunset') {
+          // Digital Sunset: 1pt if locked by 10 PM
+          score += calculateSunsetPoints(day.sunsetTime, isWeekend);
+        } else if (habit.id === 'career') {
+          // Sunday Reset Clause: If Sunday sleep was late, halve Monday career points
+          let careerPoints = day.habits[habit.id];
+          if (isMonday && week && !wasSundaySleepOnTime(week)) {
+            careerPoints = Math.floor(careerPoints / 2);
+          }
+          score += careerPoints;
         } else {
           score += day.habits[habit.id];
         }
@@ -252,18 +329,18 @@
       return score;
     };
 
-    const calculateDailyScore = (day, tasks) => {
-      return calculateCoreScore(day) + calculateBonusScore(day, tasks);
+    const calculateDailyScore = (day, tasks, week = null) => {
+      return calculateCoreScore(day, week) + calculateBonusScore(day, tasks);
     };
 
     const calculateWeekStats = (week, tasks, streakDays) => {
       const activeDaysCount = week.days.filter(d => !d.isOffDay).length;
       const activeRatio = activeDaysCount / 7;
 
-      // Calculate core and bonus scores separately
-      const dailyCoreScores = week.days.map(day => calculateCoreScore(day));
+      // Calculate core and bonus scores separately (pass week for Sunday Reset)
+      const dailyCoreScores = week.days.map(day => calculateCoreScore(day, week));
       const dailyBonusScores = week.days.map(day => calculateBonusScore(day, tasks));
-      const dailyScores = week.days.map(day => calculateDailyScore(day, tasks));
+      const dailyScores = week.days.map(day => calculateDailyScore(day, tasks, week));
 
       const weeklyCoreScore = dailyCoreScores.reduce((sum, s) => sum + s, 0);
       const weeklyBonusScore = dailyBonusScores.reduce((sum, s) => sum + s, 0);
@@ -389,7 +466,7 @@
       const toggleHabit = (dayIndex, habitId) => {
         const day = currentWeek.days[dayIndex];
         if (day.isLocked || day.isOffDay) return;
-        if (habitId === 'reading') return; // Reading uses separate input
+        if (habitId === 'reading' || habitId === 'sleep' || habitId === 'sunset') return; // These use separate inputs
 
         const habit = HABITS.find(h => h.id === habitId);
         const currentValue = day.habits[habitId];
@@ -420,6 +497,30 @@
 
         const newState = JSON.parse(JSON.stringify(state));
         newState.weeks[state.currentWeek].days[dayIndex].pagesRead = Math.max(0, parseInt(pages) || 0);
+        newState.weeks[state.currentWeek].days[dayIndex].isFilled = true;
+        newState.weeks[state.currentWeek].days[dayIndex].lastUpdated = new Date().toISOString();
+
+        saveState(newState);
+      };
+
+      const updateSleepTime = (dayIndex, time) => {
+        const day = currentWeek.days[dayIndex];
+        if (day.isLocked || day.isOffDay) return;
+
+        const newState = JSON.parse(JSON.stringify(state));
+        newState.weeks[state.currentWeek].days[dayIndex].sleepTime = time;
+        newState.weeks[state.currentWeek].days[dayIndex].isFilled = true;
+        newState.weeks[state.currentWeek].days[dayIndex].lastUpdated = new Date().toISOString();
+
+        saveState(newState);
+      };
+
+      const updateSunsetTime = (dayIndex, time) => {
+        const day = currentWeek.days[dayIndex];
+        if (day.isLocked || day.isOffDay) return;
+
+        const newState = JSON.parse(JSON.stringify(state));
+        newState.weeks[state.currentWeek].days[dayIndex].sunsetTime = time;
         newState.weeks[state.currentWeek].days[dayIndex].isFilled = true;
         newState.weeks[state.currentWeek].days[dayIndex].lastUpdated = new Date().toISOString();
 
@@ -666,7 +767,7 @@
                 const isFuture = isFutureDay(day.date);
                 const needsBackfill = isPast && !day.isFilled && !day.isOffDay;
 
-                const dayScore = calculateDailyScore(day, state.adHocTasks);
+                const dayScore = calculateDailyScore(day, state.adHocTasks, currentWeek);
 
                 const wasBackfilled = isBackfilled(day);
 
@@ -719,6 +820,80 @@
                         <div className="grid grid-cols-2 gap-2 mb-4">
                           {HABITS.map(habit => {
                             const isDisabled = day.isLocked;
+                            const isWeekend = isWeekendDay(day.date);
+
+                            // Special handling for Sleep (time input with velocity)
+                            if (habit.id === 'sleep') {
+                              const sleepTime = day.sleepTime || '';
+                              const sleepPoints = calculateSleepPoints(sleepTime, isWeekend);
+                              const hasTime = sleepTime !== '';
+
+                              return (
+                                <div
+                                  key={habit.id}
+                                  className={`p-3 rounded-lg font-semibold text-sm flex items-center justify-between ${
+                                    isDisabled
+                                      ? 'opacity-50 bg-gray-700'
+                                      : sleepPoints >= 1
+                                      ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white'
+                                      : sleepPoints < 0
+                                      ? 'bg-gradient-to-r from-red-500 to-red-700 text-white'
+                                      : 'bg-white/5 text-purple-300'
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <span className="text-lg">{habit.icon}</span>
+                                    <span className="text-xs">{isWeekend ? 'Sleep (Free)' : habit.name}</span>
+                                  </span>
+                                  <div className="flex flex-col items-end">
+                                    <input
+                                      type="time"
+                                      className="w-20 bg-white/20 text-center rounded text-xs p-1 text-white"
+                                      value={sleepTime}
+                                      onChange={(e) => updateSleepTime(actualDayIndex, e.target.value)}
+                                      disabled={isDisabled}
+                                    />
+                                    <span className={`text-[10px] mono mt-1 ${sleepPoints < 0 ? 'text-red-300' : 'opacity-75'}`}>
+                                      {sleepPoints >= 0 ? '+' : ''}{sleepPoints}pt
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            // Special handling for Digital Sunset (time input)
+                            if (habit.id === 'sunset') {
+                              const sunsetTime = day.sunsetTime || '';
+                              const sunsetPoints = calculateSunsetPoints(sunsetTime, isWeekend);
+
+                              return (
+                                <div
+                                  key={habit.id}
+                                  className={`p-3 rounded-lg font-semibold text-sm flex items-center justify-between ${
+                                    isDisabled
+                                      ? 'opacity-50 bg-gray-700'
+                                      : sunsetPoints >= 1
+                                      ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white'
+                                      : 'bg-white/5 text-purple-300'
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <span className="text-lg">{habit.icon}</span>
+                                    <span className="text-xs">{isWeekend ? 'Sunset (Free)' : habit.name}</span>
+                                  </span>
+                                  <div className="flex flex-col items-end">
+                                    <input
+                                      type="time"
+                                      className="w-20 bg-white/20 text-center rounded text-xs p-1 text-white"
+                                      value={sunsetTime}
+                                      onChange={(e) => updateSunsetTime(actualDayIndex, e.target.value)}
+                                      disabled={isDisabled}
+                                    />
+                                    <span className="text-[10px] mono opacity-75 mt-1">+{sunsetPoints}pt</span>
+                                  </div>
+                                </div>
+                              );
+                            }
 
                             // Special handling for reading (quantitative input)
                             if (habit.id === 'reading') {
