@@ -302,6 +302,7 @@
       { id: 'lunch', name: 'Lunch', icon: '🍳', points: 2, stealthName: 'FUEL_01', stealthIcon: '▲' },
       { id: 'dinner', name: 'Dinner', icon: '🍽️', points: 2, stealthName: 'FUEL_02', stealthIcon: '▼' },
       { id: 'loseit', name: 'Diet Logged', icon: '🥗', points: 2, stealthName: 'LOG_01', stealthIcon: '◇' },
+      { id: 'weight', name: 'Weight Logged', icon: '⚖️', points: 0.5, stealthName: 'LOG_02', stealthIcon: '□' },
 
       // TIER 3: Physical (Movement)
       { id: 'gym', name: 'Gym', icon: '💪', points: 1, stealthName: 'MOVE_01', stealthIcon: '●' },
@@ -451,7 +452,7 @@
     const createEmptyDay = (date) => ({
       date: date.toISOString(),
       habits: {
-        nofap: 0, gym: 0, yoga: 0, lunch: 0, dinner: 0, loseit: 0,
+        nofap: 0, gym: 0, yoga: 0, lunch: 0, dinner: 0, loseit: 0, weight: 0,
         laundry: 0, dishes: 0, cleaning: 0, meditation: 0,
         prayer: 0, sunset: 0, sleep: 0, journal: 0, reading: 0, career: 0
       },
@@ -2277,6 +2278,7 @@
                 <div className="flex justify-between"><span>Lunch / Dinner / Diet / Reading</span><span className="text-green-400">2 pts each</span></div>
                 <div className="flex justify-between"><span>Sleep (variable: -1 to +2)</span><span className="text-blue-400">time-based</span></div>
                 <div className="flex justify-between"><span>Most other habits</span><span className="text-green-400">1 pt each</span></div>
+                <div className="flex justify-between"><span>Weight Logged (just track it!)</span><span className="text-green-400">0.5 pts</span></div>
               </div>
             </div>
 
