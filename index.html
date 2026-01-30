@@ -770,11 +770,18 @@
       return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
     };
 
-    // Check if a day is Friday or Saturday (weekend buffer days)
+    // Check if a day is Friday or Saturday (weekend buffer days for sleep)
     const isWeekendDay = (dateStr) => {
       const date = new Date(dateStr);
       const day = date.getDay();
       return day === 5 || day === 6; // Friday = 5, Saturday = 6
+    };
+
+    // Check if a day is Saturday or Sunday (non-work days)
+    const isNonWorkDay = (dateStr) => {
+      const date = new Date(dateStr);
+      const day = date.getDay();
+      return day === 0 || day === 6; // Sunday = 0, Saturday = 6
     };
 
     // Check if a day is Sunday
@@ -997,8 +1004,8 @@
         score += SCREEN_QUOTA.TIME_LEAK_PENALTY; // -5 pts
       }
 
-      // Productivity Rating: Cognitive Throughput bonus (workdays only)
-      if (!isWeekend && day.productivityRating !== null && day.productivityRating !== undefined) {
+      // Productivity Rating: Cognitive Throughput bonus (workdays only - not Sat/Sun)
+      if (!isNonWorkDay(day.date) && day.productivityRating !== null && day.productivityRating !== undefined) {
         score += PRODUCTIVITY_TIERS[day.productivityRating].points;
       }
 
@@ -2324,8 +2331,7 @@
                           }
 
                           // Productivity only on workdays (not Sat/Sun)
-                          const isWeekend = isWeekendDay(day.date);
-                          if (isWeekend) {
+                          if (isNonWorkDay(day.date)) {
                             return (
                               <td key={dayIdx} className={`matrix-cell matrix-score-zero ${isToday ? 'matrix-today-col' : ''}`} title="No work on weekends">
                                 -
@@ -2360,7 +2366,7 @@
                           {(() => {
                             let total = 0;
                             currentWeek.days.forEach(day => {
-                              if (day.isOffDay || isFutureDay(day.date) || isWeekendDay(day.date)) return;
+                              if (day.isOffDay || isFutureDay(day.date) || isNonWorkDay(day.date)) return;
                               if (day.productivityRating !== null && day.productivityRating !== undefined) {
                                 total += PRODUCTIVITY_TIERS[day.productivityRating].points;
                               }
@@ -2857,7 +2863,7 @@
                         })()}
 
                         {/* Productivity Rating Slider - Only on workdays (not Sat/Sun) */}
-                        {!isWeekendDay(day.date) && (
+                        {!isNonWorkDay(day.date) && (
                         <div className={`glass rounded-xl p-4 mb-4 ${day.productivityRating === 4 ? 'flow-state-active' : ''}`}>
                           <div className="flex items-center justify-between mb-3">
                             <div className="text-sm font-semibold text-purple-300">
