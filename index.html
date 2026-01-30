@@ -997,8 +997,8 @@
         score += SCREEN_QUOTA.TIME_LEAK_PENALTY; // -5 pts
       }
 
-      // Productivity Rating: Cognitive Throughput bonus
-      if (day.productivityRating !== null && day.productivityRating !== undefined) {
+      // Productivity Rating: Cognitive Throughput bonus (workdays only)
+      if (!isWeekend && day.productivityRating !== null && day.productivityRating !== undefined) {
         score += PRODUCTIVITY_TIERS[day.productivityRating].points;
       }
 
@@ -1049,7 +1049,7 @@
         }
       });
 
-      const freeMealAllowance = Math.floor((activeDaysCount * 2) * 0.2); // 20% slack
+      const freeMealAllowance = Math.floor((activeDaysCount * 2) * 0.22); // ~3 free skips per week
       const extraMealsSkipped = Math.max(0, mealsSkipped - freeMealAllowance);
       const mealPenalty = extraMealsSkipped * 2;
 
@@ -2323,6 +2323,16 @@
                             );
                           }
 
+                          // Productivity only on workdays (not Sat/Sun)
+                          const isWeekend = isWeekendDay(day.date);
+                          if (isWeekend) {
+                            return (
+                              <td key={dayIdx} className={`matrix-cell matrix-score-zero ${isToday ? 'matrix-today-col' : ''}`} title="No work on weekends">
+                                -
+                              </td>
+                            );
+                          }
+
                           const rating = day.productivityRating;
                           const hasRating = rating !== null && rating !== undefined;
                           const tier = hasRating ? PRODUCTIVITY_TIERS[rating] : null;
@@ -2350,7 +2360,7 @@
                           {(() => {
                             let total = 0;
                             currentWeek.days.forEach(day => {
-                              if (day.isOffDay || isFutureDay(day.date)) return;
+                              if (day.isOffDay || isFutureDay(day.date) || isWeekendDay(day.date)) return;
                               if (day.productivityRating !== null && day.productivityRating !== undefined) {
                                 total += PRODUCTIVITY_TIERS[day.productivityRating].points;
                               }
@@ -2846,7 +2856,8 @@
                           );
                         })()}
 
-                        {/* Productivity Rating Slider */}
+                        {/* Productivity Rating Slider - Only on workdays (not Sat/Sun) */}
+                        {!isWeekendDay(day.date) && (
                         <div className={`glass rounded-xl p-4 mb-4 ${day.productivityRating === 4 ? 'flow-state-active' : ''}`}>
                           <div className="flex items-center justify-between mb-3">
                             <div className="text-sm font-semibold text-purple-300">
@@ -2902,6 +2913,7 @@
                             );
                           })()}
                         </div>
+                        )}
 
                         {/* Day Controls */}
                         <div className="flex gap-2">
@@ -3606,7 +3618,7 @@ function doPost(e) {
                 </div>
                 <div>
                   <div className="font-bold text-blue-300">Meal Flexibility</div>
-                  <p className="text-purple-200">20% of meals can be skipped free. After that, -2pts per skip.</p>
+                  <p className="text-purple-200">3 meals can be skipped free per week. After that, -2pts per skip.</p>
                 </div>
                 <div>
                   <div className="font-bold text-blue-300">Vital Rest Days</div>
