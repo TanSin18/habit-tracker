@@ -974,7 +974,7 @@
       let score = 0;
       HABITS.forEach(habit => {
         if (habit.id === 'reading') {
-          // Quantitative reading: 1pt per 20 pages
+          // Progressive tiered reading points (1-20pts based on pages read)
           score += calculateReadingPoints(day.pagesRead);
         } else if (habit.id === 'sleep') {
           // Sleep Velocity: Variable points based on time
