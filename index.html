@@ -1049,7 +1049,7 @@
         }
       });
 
-      const freeMealAllowance = Math.floor((activeDaysCount * 2) * 0.2); // 20% slack
+      const freeMealAllowance = Math.floor((activeDaysCount * 2) * 0.22); // ~3 free skips per week
       const extraMealsSkipped = Math.max(0, mealsSkipped - freeMealAllowance);
       const mealPenalty = extraMealsSkipped * 2;
 
@@ -3606,7 +3606,7 @@ function doPost(e) {
                 </div>
                 <div>
                   <div className="font-bold text-blue-300">Meal Flexibility</div>
-                  <p className="text-purple-200">20% of meals can be skipped free. After that, -2pts per skip.</p>
+                  <p className="text-purple-200">3 meals can be skipped free per week. After that, -2pts per skip.</p>
                 </div>
                 <div>
                   <div className="font-bold text-blue-300">Vital Rest Days</div>
