@@ -921,6 +921,48 @@
     // SCORING LOGIC
     // ============================================================================
 
+    // Progressive reading points - rewards deeper reading sessions
+    // Tier 1: 1-15 pages = 1pt (habit building)
+    // Tier 2: 16-30 pages = 2pts (proper session)
+    // Tier 3: 31-50 pages = 4pts (deep work)
+    // Tier 4: 51-75 pages = 7pts (significant reading)
+    // Tier 5: 76-100 pages = 11pts (marathon session)
+    // Tier 6: 101-150 pages = 17pts (exceptional)
+    // Tier 7: 151+ pages = 20pts (max/day)
+    const calculateReadingPoints = (pages) => {
+      if (!pages || pages <= 0) return 0;
+      if (pages >= 151) return 20;  // Cap: Ultra achievement
+      if (pages >= 101) return 17;  // Exceptional
+      if (pages >= 76) return 11;   // Marathon session
+      if (pages >= 51) return 7;    // Significant reading
+      if (pages >= 31) return 4;    // Deep work
+      if (pages >= 16) return 2;    // Proper session
+      return 1;                      // Habit building (1-15 pages)
+    };
+
+    // Get reading tier progress info for UI
+    const getReadingTierInfo = (pages) => {
+      const tiers = [
+        { min: 0, max: 0, points: 0, nextAt: 1 },
+        { min: 1, max: 15, points: 1, nextAt: 16 },
+        { min: 16, max: 30, points: 2, nextAt: 31 },
+        { min: 31, max: 50, points: 4, nextAt: 51 },
+        { min: 51, max: 75, points: 7, nextAt: 76 },
+        { min: 76, max: 100, points: 11, nextAt: 101 },
+        { min: 101, max: 150, points: 17, nextAt: 151 },
+        { min: 151, max: Infinity, points: 20, nextAt: null }
+      ];
+
+      const p = pages || 0;
+      const tier = tiers.find(t => p >= t.min && p <= t.max) || tiers[0];
+      const tierSize = tier.max === Infinity ? 1 : (tier.max - tier.min + 1);
+      const pagesInTier = p - tier.min;
+      const progressPercent = tier.nextAt ? Math.min(100, (pagesInTier / tierSize) * 100) : 100;
+      const pagesToNext = tier.nextAt ? tier.nextAt - p : 0;
+
+      return { points: tier.points, pagesToNext, progressPercent, isMaxed: !tier.nextAt };
+    };
+
     // Calculate core habit score (excludes bonus tasks)
     // Now accepts week for Sunday Reset clause and Vital Rest validation
     const calculateCoreScore = (day, week = null) => {
@@ -933,7 +975,7 @@
       HABITS.forEach(habit => {
         if (habit.id === 'reading') {
           // Quantitative reading: 1pt per 20 pages
-          score += Math.floor((day.pagesRead || 0) / 20);
+          score += calculateReadingPoints(day.pagesRead);
         } else if (habit.id === 'sleep') {
           // Sleep Velocity: Variable points based on time
           score += calculateSleepPoints(day.sleepTime, isWeekend);
@@ -2279,10 +2321,10 @@
                                 cellDisplay = `+${cellValue}`;
                                 cellClass = cellValue >= 1 ? 'matrix-score-full' : 'matrix-score-zero';
                               } else if (habit.id === 'reading') {
-                                cellValue = Math.floor((day.pagesRead || 0) / 20);
+                                cellValue = calculateReadingPoints(day.pagesRead);
                                 cellDisplay = `+${cellValue}`;
-                                if (cellValue >= 2) cellClass = 'matrix-score-full';
-                                else if (cellValue >= 1) cellClass = 'matrix-score-partial';
+                                if (cellValue >= 7) cellClass = 'matrix-score-full';      // 51+ pages
+                                else if (cellValue >= 2) cellClass = 'matrix-score-partial'; // 16+ pages
                               } else if (habit.id === 'gym' && day.isVitalRest) {
                                 cellValue = 1;
                                 cellDisplay = 'R';
@@ -2336,7 +2378,7 @@
                                   } else if (habit.id === 'sunset') {
                                     total += calculateSunsetPoints(day.sunsetTime, isWeekend);
                                   } else if (habit.id === 'reading') {
-                                    total += Math.floor((day.pagesRead || 0) / 20);
+                                    total += calculateReadingPoints(day.pagesRead);
                                   } else if (habit.id === 'gym' && day.isVitalRest) {
                                     total += 1;
                                   } else if (habit.isWeekly) {
@@ -2675,8 +2717,10 @@
                             // Special handling for reading (quantitative input with counter)
                             if (habit.id === 'reading') {
                               const pagesRead = day.pagesRead || 0;
-                              const readingPoints = Math.floor(pagesRead / 20);
-                              const isComplete = pagesRead >= 20;
+                              const tierInfo = getReadingTierInfo(pagesRead);
+                              const readingPoints = tierInfo.points;
+                              const isComplete = pagesRead >= 16; // Tier 2+ = proper session
+                              const isExceptional = pagesRead >= 51; // Tier 4+ = significant reading
                               const isAnimating = pageFlipAnim === `${actualDayIndex}-reading`;
 
                               const incrementPages = () => {
@@ -2698,8 +2742,12 @@
                                   className={`p-3 rounded-lg font-semibold text-sm ${
                                     isDisabled
                                       ? 'opacity-50 bg-gray-700'
+                                      : isExceptional
+                                      ? 'bg-gradient-to-r from-amber-600 to-orange-700 text-white'
                                       : isComplete
                                       ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white'
+                                      : pagesRead >= 1
+                                      ? 'bg-gradient-to-r from-slate-600 to-slate-700 text-white'
                                       : 'bg-white/5 text-purple-300'
                                   }`}
                                 >
@@ -2737,15 +2785,22 @@
                                     </button>
                                   </div>
 
-                                  {/* Progress to next point */}
+                                  {/* Progress to next tier */}
                                   <div className="mt-2 h-1 bg-white/10 rounded-full overflow-hidden">
                                     <div
-                                      className="h-full bg-gradient-to-r from-violet-600 to-indigo-600 transition-all duration-300"
-                                      style={{ width: `${(pagesRead % 20) / 20 * 100}%` }}
+                                      className={`h-full transition-all duration-300 ${
+                                        tierInfo.isMaxed
+                                          ? 'bg-gradient-to-r from-amber-500 to-yellow-400'
+                                          : 'bg-gradient-to-r from-violet-600 to-indigo-600'
+                                      }`}
+                                      style={{ width: `${tierInfo.progressPercent}%` }}
                                     />
                                   </div>
                                   <div className="text-[9px] text-center mt-1 opacity-60">
-                                    {20 - (pagesRead % 20)} pages to next point
+                                    {tierInfo.isMaxed
+                                      ? '🏆 Maximum tier reached!'
+                                      : `${tierInfo.pagesToNext} pages to next tier (+${calculateReadingPoints(pagesRead + tierInfo.pagesToNext) - readingPoints}pt)`
+                                    }
                                   </div>
                                 </div>
                               );
