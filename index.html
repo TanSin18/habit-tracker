@@ -1477,8 +1477,23 @@
       }, []);
 
       // Google Sheets sync function - PUSH to sheets
-      const syncToGoogleSheets = async (data) => {
+      const syncToGoogleSheets = async (data, forceSync = false) => {
         if (!sheetsConfig || !sheetsConfig.webAppUrl) return;
+
+        // PROTECTION: Don't sync empty/fresh data unless forced
+        // This prevents overwriting good cloud data with empty local data
+        if (!forceSync) {
+          const hasFilledDays = data.weeks.some(week =>
+            week.days.some(day => day.isFilled)
+          );
+          const hasStreak = data.streakDays > 0;
+          const hasBalance = data.guiltFreeBalance > 0 || data.nreBalance > 0;
+
+          if (!hasFilledDays && !hasStreak && !hasBalance) {
+            console.log('Skipping sync: data appears to be fresh/empty');
+            return;
+          }
+        }
 
         setSyncStatus('syncing');
         try {
@@ -3933,7 +3948,7 @@
                   onClick={() => {
                     const script = `// Two-Way Sync Script for Discipline Tracker
 // Handles both saving (POST) and loading (GET) data
-// Auto-cleans empty rows
+// Auto-cleans empty rows, finds BEST data (highest streak)
 
 function doGet(e) {
   try {
@@ -3945,38 +3960,50 @@ function doGet(e) {
     var lastRow = sheet.getLastRow();
 
     if (lastRow < 2) {
-      // No data yet
       return ContentService.createTextOutput(
         JSON.stringify({ success: true, data: null })
       ).setMimeType(ContentService.MimeType.JSON);
     }
 
-    // Find the last row with valid JSON data (column B)
-    var validRow = lastRow;
-    for (var i = lastRow; i >= 2; i--) {
-      var cellValue = sheet.getRange(i, 2).getValue();
-      if (cellValue && cellValue.toString().trim().startsWith('{')) {
-        validRow = i;
-        break;
+    // Find the row with the BEST data (highest streak count)
+    // This prevents empty/reset data from being returned
+    var bestRow = -1;
+    var bestStreak = -1;
+    var bestWeek = -1;
+
+    for (var i = 2; i <= lastRow; i++) {
+      var streak = sheet.getRange(i, 4).getValue(); // Column D = Streak
+      var week = sheet.getRange(i, 5).getValue();   // Column E = Week
+      var jsonData = sheet.getRange(i, 2).getValue();
+
+      // Check if this row has valid data
+      if (jsonData && jsonData.toString().trim().startsWith('{')) {
+        // Prefer higher streak, or if same streak, higher week number
+        if (streak > bestStreak || (streak === bestStreak && week > bestWeek)) {
+          bestStreak = streak;
+          bestWeek = week;
+          bestRow = i;
+        }
       }
     }
 
-    // Get the latest valid data
-    var jsonData = sheet.getRange(validRow, 2).getValue();
-    var timestamp = sheet.getRange(validRow, 1).getValue();
-
-    if (!jsonData) {
+    if (bestRow === -1) {
       return ContentService.createTextOutput(
         JSON.stringify({ success: true, data: null })
       ).setMimeType(ContentService.MimeType.JSON);
     }
+
+    var jsonData = sheet.getRange(bestRow, 2).getValue();
+    var timestamp = sheet.getRange(bestRow, 1).getValue();
 
     return ContentService.createTextOutput(
       JSON.stringify({
         success: true,
         data: JSON.parse(jsonData),
         timestamp: timestamp,
-        rowCount: lastRow
+        rowCount: lastRow,
+        restoredFromRow: bestRow,
+        streak: bestStreak
       })
     ).setMimeType(ContentService.MimeType.JSON);
 
@@ -3991,6 +4018,18 @@ function doPost(e) {
   try {
     var payload = JSON.parse(e.postData.contents);
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+
+    // PROTECTION: Don't save empty/reset data if we have better data
+    var dominated = isDominatedByExisting(sheet, payload.data);
+    if (dominated) {
+      return ContentService.createTextOutput(
+        JSON.stringify({
+          success: true,
+          skipped: true,
+          reason: 'Existing data has higher streak, not overwriting'
+        })
+      ).setMimeType(ContentService.MimeType.JSON);
+    }
 
     // Add header if first time
     if (sheet.getLastRow() === 0) {
@@ -4026,12 +4065,30 @@ function doPost(e) {
   }
 }
 
+// Check if incoming data is "worse" than best existing data
+function isDominatedByExisting(sheet, newData) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return false; // No existing data
+
+  var newStreak = newData.streakDays || 0;
+  var newWeek = newData.currentWeek || 0;
+
+  // Find best existing streak
+  for (var i = 2; i <= lastRow; i++) {
+    var existingStreak = sheet.getRange(i, 4).getValue() || 0;
+    // If new data has streak of 0 but existing has streak > 5, protect it
+    if (newStreak === 0 && existingStreak > 5) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Helper function to clean empty rows
 function cleanEmptyRows(sheet) {
   var lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return; // Only header or empty
+  if (lastRow <= 1) return;
 
-  // Go from bottom to top to avoid index shifting issues
   for (var i = lastRow; i >= 2; i--) {
     var rowValues = sheet.getRange(i, 1, 1, 5).getValues()[0];
     var isEmpty = rowValues.every(function(cell) {
