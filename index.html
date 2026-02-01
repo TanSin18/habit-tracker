@@ -1492,18 +1492,22 @@
         if (todayDay.isLocked || todayDay.isOffDay) return;
 
         // Only auto-complete if not relapsed (0) and not already complete (3)
-        if (todayDay.habits.nofap === 0 || todayDay.habits.nofap === 3) return;
+        const nofapValue = todayDay.habits.nofap;
+        if (nofapValue === 0 || nofapValue === 3) return;
 
-        const newState = JSON.parse(JSON.stringify(state));
-        newState.weeks[state.currentWeek].days[todayIndex].habits.nofap = 3;
-        newState.weeks[state.currentWeek].days[todayIndex].isFilled = true;
-        newState.weeks[state.currentWeek].days[todayIndex].lastUpdated = new Date().toISOString();
-        newState.streakDays++;
-        if (newState.streakDays > newState.longestStreak) {
-          newState.longestStreak = newState.streakDays;
-        }
-        saveState(newState);
-      }, [isLoaded, state?.currentWeek]);
+        // Use setTimeout to avoid state update during render cycle
+        setTimeout(() => {
+          const newState = JSON.parse(JSON.stringify(state));
+          newState.weeks[state.currentWeek].days[todayIndex].habits.nofap = 3;
+          newState.weeks[state.currentWeek].days[todayIndex].isFilled = true;
+          newState.weeks[state.currentWeek].days[todayIndex].lastUpdated = new Date().toISOString();
+          newState.streakDays++;
+          if (newState.streakDays > newState.longestStreak) {
+            newState.longestStreak = newState.streakDays;
+          }
+          saveState(newState);
+        }, 100);
+      }, [isLoaded]);
 
       // Google Sheets sync function - PUSH to sheets
       const syncToGoogleSheets = async (data) => {
