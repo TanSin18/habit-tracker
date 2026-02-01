@@ -3613,6 +3613,27 @@
               onClose={() => setShowSheetsModal(false)}
               onSave={saveSheetsConfig}
               currentConfig={sheetsConfig}
+              onRestore={async (url) => {
+                // Try to fetch data from the provided sheets URL
+                try {
+                  const response = await fetch(url, { method: 'GET', redirect: 'follow' });
+                  if (response.ok) {
+                    const result = await response.json();
+                    if (result.success && result.data) {
+                      // Restore the data
+                      const restoredState = checkAndCreateNewWeeks(result.data);
+                      setState(restoredState);
+                      saveToStorage(restoredState);
+                      setShowSheetsModal(false);
+                      triggerHaptic('sparkle');
+                      return { success: true };
+                    }
+                  }
+                  return { success: false, error: 'No data found in sheets' };
+                } catch (err) {
+                  return { success: false, error: err.message };
+                }
+              }}
             />
           )}
 
@@ -3788,9 +3809,11 @@
     // GOOGLE SHEETS SETUP MODAL
     // ============================================================================
 
-    function SheetsModal({ onClose, onSave, currentConfig }) {
+    function SheetsModal({ onClose, onSave, currentConfig, onRestore }) {
       const [webAppUrl, setWebAppUrl] = useState(currentConfig?.webAppUrl || '');
       const [step, setStep] = useState(currentConfig ? 'connected' : 'intro');
+      const [isRestoring, setIsRestoring] = useState(false);
+      const [restoreError, setRestoreError] = useState(null);
 
       const handleSave = () => {
         if (!webAppUrl.trim()) {
@@ -3798,6 +3821,26 @@
           return;
         }
         onSave({ webAppUrl: webAppUrl.trim() });
+      };
+
+      const handleRestore = async () => {
+        if (!webAppUrl.trim()) {
+          alert('Please enter your Google Apps Script Web App URL first');
+          return;
+        }
+        setIsRestoring(true);
+        setRestoreError(null);
+
+        const result = await onRestore(webAppUrl.trim());
+
+        if (result.success) {
+          // Also save the config
+          onSave({ webAppUrl: webAppUrl.trim() });
+          alert('Data restored successfully from cloud!');
+        } else {
+          setRestoreError(result.error || 'Failed to restore data');
+        }
+        setIsRestoring(false);
       };
 
       const handleDisconnect = () => {
@@ -3890,10 +3933,15 @@
                   onClick={() => {
                     const script = `// Two-Way Sync Script for Discipline Tracker
 // Handles both saving (POST) and loading (GET) data
+// Auto-cleans empty rows
 
 function doGet(e) {
   try {
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+
+    // Clean up empty rows first
+    cleanEmptyRows(sheet);
+
     var lastRow = sheet.getLastRow();
 
     if (lastRow < 2) {
@@ -3903,9 +3951,25 @@ function doGet(e) {
       ).setMimeType(ContentService.MimeType.JSON);
     }
 
-    // Get the latest data (last row, column B has JSON)
-    var jsonData = sheet.getRange(lastRow, 2).getValue();
-    var timestamp = sheet.getRange(lastRow, 1).getValue();
+    // Find the last row with valid JSON data (column B)
+    var validRow = lastRow;
+    for (var i = lastRow; i >= 2; i--) {
+      var cellValue = sheet.getRange(i, 2).getValue();
+      if (cellValue && cellValue.toString().trim().startsWith('{')) {
+        validRow = i;
+        break;
+      }
+    }
+
+    // Get the latest valid data
+    var jsonData = sheet.getRange(validRow, 2).getValue();
+    var timestamp = sheet.getRange(validRow, 1).getValue();
+
+    if (!jsonData) {
+      return ContentService.createTextOutput(
+        JSON.stringify({ success: true, data: null })
+      ).setMimeType(ContentService.MimeType.JSON);
+    }
 
     return ContentService.createTextOutput(
       JSON.stringify({
@@ -3933,6 +3997,9 @@ function doPost(e) {
       sheet.appendRow(['Timestamp', 'State JSON', 'Device', 'Streak', 'Week']);
     }
 
+    // Clean up empty rows before adding new data
+    cleanEmptyRows(sheet);
+
     // Append new row with full state
     sheet.appendRow([
       payload.timestamp || new Date().toISOString(),
@@ -3956,6 +4023,24 @@ function doPost(e) {
     return ContentService.createTextOutput(
       JSON.stringify({ success: false, error: err.message })
     ).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// Helper function to clean empty rows
+function cleanEmptyRows(sheet) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return; // Only header or empty
+
+  // Go from bottom to top to avoid index shifting issues
+  for (var i = lastRow; i >= 2; i--) {
+    var rowValues = sheet.getRange(i, 1, 1, 5).getValues()[0];
+    var isEmpty = rowValues.every(function(cell) {
+      return cell === '' || cell === null || cell === undefined;
+    });
+
+    if (isEmpty) {
+      sheet.deleteRow(i);
+    }
   }
 }`;
                     navigator.clipboard.writeText(script);
@@ -3984,14 +4069,14 @@ function doPost(e) {
 
             {step === 'url' && (
               <>
-                <div className="mb-6">
+                <div className="mb-4">
                   <label className="block text-sm font-semibold text-purple-300 mb-2">
                     Google Apps Script Web App URL
                   </label>
                   <input
                     type="url"
                     value={webAppUrl}
-                    onChange={(e) => setWebAppUrl(e.target.value)}
+                    onChange={(e) => { setWebAppUrl(e.target.value); setRestoreError(null); }}
                     placeholder="https://script.google.com/macros/s/..."
                     className="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 focus:border-purple-400 focus:outline-none text-white placeholder-purple-400 text-sm"
                     autoFocus
@@ -3999,6 +4084,31 @@ function doPost(e) {
                   <p className="text-[10px] text-purple-400 mt-2">
                     This URL is from your deployed Google Apps Script web app
                   </p>
+                </div>
+
+                {restoreError && (
+                  <div className="mb-4 p-3 rounded-lg bg-red-500/20 border border-red-500/30 text-red-300 text-sm">
+                    {restoreError}
+                  </div>
+                )}
+
+                {/* Restore from Cloud option */}
+                <div className="mb-4 p-4 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                  <div className="text-sm font-semibold text-amber-300 mb-2">Lost your data?</div>
+                  <p className="text-xs text-amber-200/80 mb-3">
+                    If you previously synced to this Google Sheet, you can restore your data from the cloud.
+                  </p>
+                  <button
+                    onClick={handleRestore}
+                    disabled={isRestoring || !webAppUrl.trim()}
+                    className={`w-full py-2 rounded-lg font-semibold text-sm ${
+                      isRestoring || !webAppUrl.trim()
+                        ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-amber-500 to-orange-600 text-white hover:from-amber-600 hover:to-orange-700'
+                    }`}
+                  >
+                    {isRestoring ? '⏳ Restoring...' : '☁️ Restore from Cloud'}
+                  </button>
                 </div>
 
                 <div className="flex gap-3">
