@@ -865,6 +865,56 @@
       return { startDate: startDate.toISOString(), days };
     };
 
+    // Auto-generate new weeks when current date passes end of existing weeks
+    const checkAndCreateNewWeeks = (currentState) => {
+      if (!currentState || !currentState.weeks || currentState.weeks.length === 0) {
+        return currentState;
+      }
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      let newState = { ...currentState };
+      let lastWeek = newState.weeks[newState.weeks.length - 1];
+      let lastDayOfLastWeek = new Date(lastWeek.days[6].date);
+      lastDayOfLastWeek.setHours(0, 0, 0, 0);
+
+      // Keep creating weeks until today is covered
+      while (today > lastDayOfLastWeek) {
+        // Create next week starting the day after last week ended
+        const nextStart = new Date(lastDayOfLastWeek);
+        nextStart.setDate(nextStart.getDate() + 1);
+
+        const newWeek = createWeek(nextStart);
+        newState = {
+          ...newState,
+          weeks: [...newState.weeks, newWeek],
+          currentWeek: newState.weeks.length, // Point to the new week
+          viewMode: 'today' // Switch to today view for new week
+        };
+
+        lastWeek = newWeek;
+        lastDayOfLastWeek = new Date(lastWeek.days[6].date);
+        lastDayOfLastWeek.setHours(0, 0, 0, 0);
+      }
+
+      // Find the week that contains today and set it as current
+      const todayTime = today.getTime();
+      for (let i = 0; i < newState.weeks.length; i++) {
+        const weekStart = new Date(newState.weeks[i].days[0].date);
+        const weekEnd = new Date(newState.weeks[i].days[6].date);
+        weekStart.setHours(0, 0, 0, 0);
+        weekEnd.setHours(23, 59, 59, 999);
+
+        if (todayTime >= weekStart.getTime() && todayTime <= weekEnd.getTime()) {
+          newState.currentWeek = i;
+          break;
+        }
+      }
+
+      return newState;
+    };
+
     const initializeState = () => {
       return {
         version: "4.0",
@@ -1133,6 +1183,8 @@
       const [syncStatus, setSyncStatus] = useState('disconnected'); // disconnected, syncing, synced, error
       const [showConflictModal, setShowConflictModal] = useState(false);
       const [conflictData, setConflictData] = useState(null); // { local, remote }
+      const [showSundayPreFlight, setShowSundayPreFlight] = useState(false);
+      const [sundayPreFlightDismissed, setSundayPreFlightDismissed] = useState(false);
 
       // Screen Timer State
       const [timerRunning, setTimerRunning] = useState(false);
@@ -1166,6 +1218,24 @@
 
         return () => clearInterval(interval);
       }, [timerRunning, timerStartTime]);
+
+      // Sunday Pre-Flight Check - Show modal at 9 PM on Sundays
+      useEffect(() => {
+        const checkSundayPreFlight = () => {
+          const now = new Date();
+          const dayOfWeek = now.getDay(); // 0 = Sunday
+          const hour = now.getHours();
+
+          // Show modal on Sunday at 9 PM or later (if not already dismissed today)
+          if (dayOfWeek === 0 && hour >= 21 && !sundayPreFlightDismissed) {
+            setShowSundayPreFlight(true);
+          }
+        };
+
+        checkSundayPreFlight();
+        const interval = setInterval(checkSundayPreFlight, 60000); // Check every minute
+        return () => clearInterval(interval);
+      }, [sundayPreFlightDismissed]);
 
       // Touch handlers for swipe gestures
       const handleTouchStart = (e) => {
@@ -1214,13 +1284,22 @@
       useEffect(() => {
         const stored = loadFromStorage();
         if (stored) {
-          setState(stored);
+          // Check if we need to create new weeks for current date
+          const updatedState = checkAndCreateNewWeeks(stored);
+          setState(updatedState);
+          // Save if new weeks were created
+          if (updatedState.weeks.length !== stored.weeks.length) {
+            saveToStorage(updatedState);
+          }
         } else {
           const initial = initializeState();
-          setState(initial);
-          saveToStorage(initial);
+          // Check for new weeks even on fresh init
+          const updatedInitial = checkAndCreateNewWeeks(initial);
+          setState(updatedInitial);
+          saveToStorage(updatedInitial);
 
-          const unfilledPastDays = initial.weeks[0].days.filter(d =>
+          const currentWeekData = updatedInitial.weeks[updatedInitial.currentWeek];
+          const unfilledPastDays = currentWeekData.days.filter(d =>
             isPastDay(d.date) && !d.isFilled && !d.isOffDay
           );
           if (unfilledPastDays.length > 0) {
@@ -1534,7 +1613,19 @@
               newState.longestStreak = newState.streakDays;
             }
           } else {
-            newState.streakDays = 0;
+            // Weekend Soft Landing: Sat/Sun failures only subtract 2 days
+            // Weekday failures (Mon-Thu) reset streak to 0
+            const dayDate = new Date(currentWeek.days[dayIndex].date);
+            const dayOfWeek = dayDate.getDay();
+            const isWeekendDay = dayOfWeek === 0 || dayOfWeek === 6; // Sun=0, Sat=6
+
+            if (isWeekendDay) {
+              // Soft landing: subtract 2 instead of full reset
+              newState.streakDays = Math.max(0, newState.streakDays - 2);
+            } else {
+              // Weekday: full reset
+              newState.streakDays = 0;
+            }
           }
         }
 
@@ -3145,6 +3236,79 @@
               onContinue={() => setShowBackfillPrompt(false)}
               unfilledCount={currentWeek.days.filter(d => isPastDay(d.date) && !d.isFilled && !d.isOffDay).length}
             />
+          )}
+
+          {/* Sunday Pre-Flight Modal */}
+          {showSundayPreFlight && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+              <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-6 max-w-md w-full border border-purple-500/30 shadow-2xl">
+                <div className="text-center mb-6">
+                  <div className="text-4xl mb-2">🚀</div>
+                  <h2 className="text-xl font-bold text-purple-300">Sunday Pre-Flight Check</h2>
+                  <p className="text-sm text-purple-400 mt-2">Prep for a strong Monday</p>
+                </div>
+
+                <div className="space-y-4 mb-6">
+                  {/* Weight Check */}
+                  <div className="glass rounded-lg p-4">
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">⚖️</span>
+                      <div className="flex-1">
+                        <div className="font-semibold text-white">Weight Logged?</div>
+                        <div className="text-xs text-purple-300">
+                          {(() => {
+                            const today = currentWeek.days.find(d => isSameDay(new Date(d.date), new Date()));
+                            const logged = today && today.habits.weight > 0;
+                            return logged
+                              ? <span className="text-emerald-400">✓ Logged today</span>
+                              : <span className="text-amber-400">⚠ Not logged yet</span>;
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Nutrition Prep Check */}
+                  <div className="glass rounded-lg p-4">
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">🥗</span>
+                      <div className="flex-1">
+                        <div className="font-semibold text-white">Nutrition Ready?</div>
+                        <div className="text-xs text-purple-300">Lose It! prepped for Monday?</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Monday Mindset */}
+                  <div className="glass rounded-lg p-4 border border-emerald-500/30">
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">💪</span>
+                      <div className="flex-1">
+                        <div className="font-semibold text-emerald-300">Monday Game Mode</div>
+                        <div className="text-xs text-purple-300">High-performance mode activates at midnight</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowSundayPreFlight(false);
+                      setSundayPreFlightDismissed(true);
+                    }}
+                    className="flex-1 py-3 rounded-lg font-semibold bg-purple-600 hover:bg-purple-500 text-white transition-all"
+                  >
+                    Ready for Monday! 🚀
+                  </button>
+                </div>
+
+                <p className="text-[10px] text-center text-purple-400 mt-4">
+                  This check appears every Sunday at 9 PM
+                </p>
+              </div>
+            </div>
           )}
         </div>
       );
