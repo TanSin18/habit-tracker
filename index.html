@@ -1405,8 +1405,8 @@
         return archived;
       };
 
-      // Get archived tasks for current week view
-      const currentWeekArchivedTasks = archiveWeekTasks(state.currentWeek);
+      // Get archived tasks for current week view (safe access before loading check)
+      const currentWeekArchivedTasks = state ? archiveWeekTasks(state.currentWeek) : [];
 
       // Manual sync button handler - pull from sheets and compare
       const manualSync = async () => {
