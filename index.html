@@ -1378,6 +1378,36 @@
         }
       };
 
+      // Archive completed bonus tasks from a week (for historical tracking)
+      const archiveWeekTasks = (weekIndex) => {
+        const week = state.weeks[weekIndex];
+        if (!week) return [];
+
+        const archived = [];
+        const weekStart = new Date(week.days[0].date);
+
+        week.days.forEach((day, dayIdx) => {
+          if (day.completedTasks && day.completedTasks.length > 0) {
+            day.completedTasks.forEach(taskId => {
+              const task = state.adHocTasks.find(t => t.id === taskId);
+              if (task) {
+                archived.push({
+                  ...task,
+                  completedDate: day.date,
+                  weekNumber: weekIndex + 1,
+                  dayOfWeek: new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' })
+                });
+              }
+            });
+          }
+        });
+
+        return archived;
+      };
+
+      // Get archived tasks for current week view
+      const currentWeekArchivedTasks = archiveWeekTasks(state.currentWeek);
+
       // Manual sync button handler - pull from sheets and compare
       const manualSync = async () => {
         if (!sheetsConfig) {
@@ -1883,10 +1913,106 @@
 
       const daysToShow = state.viewMode === 'today' ? (todayDay ? [todayDay] : []) : currentWeek.days;
 
-      // Week navigation for swipe gestures
+      // Check if viewing a past (sealed) week
+      const isViewingPastWeek = (() => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const weekEndDate = new Date(currentWeek.days[6].date);
+        weekEndDate.setHours(23, 59, 59, 999);
+        return today > weekEndDate;
+      })();
+
+      // Calculate week stats for display
+      const calculateWeekMetrics = (week) => {
+        let totalPages = 0;
+        let sleepTimes = [];
+        let mealsLogged = 0;
+        let totalMeals = 0;
+        let activeDays = 0;
+
+        week.days.forEach(day => {
+          if (day.isOffDay || isFutureDay(day.date)) return;
+          activeDays++;
+
+          // Knowledge Velocity (total pages)
+          totalPages += day.pagesRead || 0;
+
+          // Sleep times for average
+          if (day.sleepTime) {
+            const [hours, mins] = day.sleepTime.split(':').map(Number);
+            let totalMins = hours * 60 + mins;
+            if (hours < 6) totalMins += 24 * 60; // After midnight adjustment
+            sleepTimes.push(totalMins);
+          }
+
+          // Nutrition compliance
+          if (day.habits.lunch > 0) mealsLogged++;
+          if (day.habits.dinner > 0) mealsLogged++;
+          totalMeals += 2;
+        });
+
+        const avgSleepMins = sleepTimes.length > 0
+          ? Math.round(sleepTimes.reduce((a, b) => a + b, 0) / sleepTimes.length)
+          : null;
+
+        const avgSleepFormatted = avgSleepMins
+          ? `${Math.floor((avgSleepMins % (24 * 60)) / 60)}:${String(avgSleepMins % 60).padStart(2, '0')}`
+          : 'N/A';
+
+        const nutritionPercent = totalMeals > 0
+          ? Math.round((mealsLogged / totalMeals) * 100)
+          : 0;
+
+        return {
+          knowledgeVelocity: totalPages,
+          avgSleep: avgSleepFormatted,
+          avgSleepMins,
+          nutritionCompliance: nutritionPercent,
+          activeDays
+        };
+      };
+
+      const currentWeekMetrics = calculateWeekMetrics(currentWeek);
+
+      // Week-over-Week delta (compare with previous week if exists)
+      const previousWeekMetrics = state.currentWeek > 0
+        ? calculateWeekMetrics(state.weeks[state.currentWeek - 1])
+        : null;
+
+      const wowDelta = previousWeekMetrics ? {
+        pagesDelta: currentWeekMetrics.knowledgeVelocity - previousWeekMetrics.knowledgeVelocity,
+        sleepDelta: currentWeekMetrics.avgSleepMins && previousWeekMetrics.avgSleepMins
+          ? currentWeekMetrics.avgSleepMins - previousWeekMetrics.avgSleepMins
+          : null,
+        nutritionDelta: currentWeekMetrics.nutritionCompliance - previousWeekMetrics.nutritionCompliance
+      } : null;
+
+      // Week navigation
       const navigateWeek = (direction) => {
-        // Placeholder for multi-week navigation
-        triggerHaptic('light');
+        const newState = JSON.parse(JSON.stringify(state));
+        if (direction === 'prev' && state.currentWeek > 0) {
+          newState.currentWeek = state.currentWeek - 1;
+          newState.viewMode = 'all-days'; // Switch to all-days when viewing past weeks
+          saveState(newState);
+          triggerHaptic('light');
+        } else if (direction === 'next' && state.currentWeek < state.weeks.length - 1) {
+          newState.currentWeek = state.currentWeek + 1;
+          saveState(newState);
+          triggerHaptic('light');
+        }
+      };
+
+      // Jump to specific week
+      const jumpToWeek = (weekIndex) => {
+        if (weekIndex >= 0 && weekIndex < state.weeks.length) {
+          const newState = JSON.parse(JSON.stringify(state));
+          newState.currentWeek = weekIndex;
+          if (weekIndex < state.weeks.length - 1) {
+            newState.viewMode = 'all-days'; // Past weeks show all days
+          }
+          saveState(newState);
+          triggerHaptic('light');
+        }
       };
 
       return (
@@ -1950,6 +2076,109 @@
               </div>
 
             </div>
+
+            {/* Week Navigator */}
+            {state.weeks.length > 1 && (
+              <div className="glass rounded-xl p-4 mb-6 animate-slide-in">
+                {/* Week Selector */}
+                <div className="flex items-center justify-between mb-3">
+                  <button
+                    onClick={() => navigateWeek('prev')}
+                    disabled={state.currentWeek === 0}
+                    className={`p-2 rounded-lg transition-all ${state.currentWeek === 0 ? 'opacity-30 cursor-not-allowed' : 'bg-white/10 hover:bg-white/20'}`}
+                  >
+                    ←
+                  </button>
+
+                  <div className="flex-1 mx-4">
+                    {/* Horizontal Week Pills */}
+                    <div className="flex gap-2 overflow-x-auto pb-2 justify-center">
+                      {state.weeks.map((week, idx) => {
+                        const weekStart = new Date(week.days[0].date);
+                        const weekEnd = new Date(week.days[6].date);
+                        const isCurrentView = idx === state.currentWeek;
+                        const isMostRecent = idx === state.weeks.length - 1;
+
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => jumpToWeek(idx)}
+                            className={`px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
+                              isCurrentView
+                                ? 'bg-purple-600 text-white'
+                                : isMostRecent
+                                ? 'bg-emerald-600/30 text-emerald-300 hover:bg-emerald-600/50'
+                                : 'bg-white/10 text-purple-300 hover:bg-white/20'
+                            }`}
+                          >
+                            W{idx + 1}
+                            {!isMostRecent && ' 🔒'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => navigateWeek('next')}
+                    disabled={state.currentWeek === state.weeks.length - 1}
+                    className={`p-2 rounded-lg transition-all ${state.currentWeek === state.weeks.length - 1 ? 'opacity-30 cursor-not-allowed' : 'bg-white/10 hover:bg-white/20'}`}
+                  >
+                    →
+                  </button>
+                </div>
+
+                {/* Week Date Range */}
+                <div className="text-center text-sm text-purple-300 mb-3">
+                  {new Date(currentWeek.days[0].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  {' - '}
+                  {new Date(currentWeek.days[6].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  {isViewingPastWeek && (
+                    <span className="ml-2 px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded-full text-xs">
+                      📜 Sealed (Read-Only)
+                    </span>
+                  )}
+                </div>
+
+                {/* Week Metrics */}
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="bg-white/5 rounded-lg p-2">
+                    <div className="text-lg font-bold text-purple-300">{currentWeekMetrics.knowledgeVelocity}</div>
+                    <div className="text-[10px] text-purple-400">Pages Read</div>
+                    {wowDelta && (
+                      <div className={`text-[9px] ${wowDelta.pagesDelta >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {wowDelta.pagesDelta >= 0 ? '↑' : '↓'} {Math.abs(wowDelta.pagesDelta)} vs W{state.currentWeek}
+                      </div>
+                    )}
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-2">
+                    <div className="text-lg font-bold text-purple-300">{currentWeekMetrics.avgSleep}</div>
+                    <div className="text-[10px] text-purple-400">Avg Sleep</div>
+                    {wowDelta && wowDelta.sleepDelta !== null && (
+                      <div className={`text-[9px] ${wowDelta.sleepDelta <= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {wowDelta.sleepDelta <= 0 ? '↑' : '↓'} {Math.abs(wowDelta.sleepDelta)}min
+                      </div>
+                    )}
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-2">
+                    <div className="text-lg font-bold text-purple-300">{currentWeekMetrics.nutritionCompliance}%</div>
+                    <div className="text-[10px] text-purple-400">Nutrition</div>
+                    {wowDelta && (
+                      <div className={`text-[9px] ${wowDelta.nutritionDelta >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {wowDelta.nutritionDelta >= 0 ? '↑' : '↓'} {Math.abs(wowDelta.nutritionDelta)}%
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Sealed Week Watermark */}
+            {isViewingPastWeek && (
+              <div className="text-center mb-4 text-amber-400/60 text-sm">
+                ⚠️ Viewing historical data - Changes disabled
+              </div>
+            )}
 
             {/* Stats Cards */}
             <div className="grid grid-cols-3 gap-3 mb-6 animate-slide-in">
@@ -2625,7 +2854,7 @@
                         {/* Habits Grid */}
                         <div className="grid grid-cols-2 gap-2 mb-4">
                           {HABITS.map(habit => {
-                            const isDisabled = day.isLocked;
+                            const isDisabled = day.isLocked || isViewingPastWeek;
                             const isWeekend = isWeekendDay(day.date);
 
                             // Special handling for Sleep (time select 10 PM - 4 AM)
@@ -2924,7 +3153,7 @@
                             <div className="space-y-2 mb-4">
                               {tasksForThisDay.map(task => {
                                 const isComplete = day.completedTasks.includes(task.id);
-                                const isDisabled = day.isLocked;
+                                const isDisabled = day.isLocked || isViewingPastWeek;
 
                                 return (
                                   <button
@@ -2976,12 +3205,12 @@
                               step="1"
                               value={day.productivityRating ?? 2}
                               onChange={(e) => {
-                                if (!day.isLocked) {
+                                if (!day.isLocked && !isViewingPastWeek) {
                                   updateProductivityRating(actualDayIndex, parseInt(e.target.value));
                                 }
                               }}
-                              disabled={day.isLocked}
-                              className={`productivity-slider slider-level-${day.productivityRating ?? 2} ${day.isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                              disabled={day.isLocked || isViewingPastWeek}
+                              className={`productivity-slider slider-level-${day.productivityRating ?? 2} ${(day.isLocked || isViewingPastWeek) ? 'opacity-50 cursor-not-allowed' : ''}`}
                             />
                             {/* Notches */}
                             <div className="productivity-notches">
@@ -3013,6 +3242,7 @@
                         )}
 
                         {/* Day Controls */}
+                        {!isViewingPastWeek && (
                         <div className="flex gap-2">
                           <button
                             onClick={() => toggleOffDay(actualDayIndex)}
@@ -3036,6 +3266,7 @@
                             {day.isLocked ? 'Unlock' : 'Lock'}
                           </button>
                         </div>
+                        )}
                       </>
                     )}
 
@@ -3043,6 +3274,7 @@
                       <div className="text-center py-4">
                         <div className="text-4xl mb-2">O</div>
                         <div className="text-purple-300 text-sm">Off Day</div>
+                        {!isViewingPastWeek && (
                         <button
                           onClick={() => toggleOffDay(actualDayIndex)}
                           disabled={day.isLocked}
@@ -3050,6 +3282,7 @@
                         >
                           Unmark
                         </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -3110,6 +3343,33 @@
                 </div>
               );
             })()}
+
+            {/* Bonus Archive (for past weeks) */}
+            {isViewingPastWeek && currentWeekArchivedTasks.length > 0 && (
+              <div className="glass rounded-xl p-4 mt-6 animate-slide-in border border-amber-500/20">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-lg">📦</span>
+                  <h3 className="text-sm font-semibold text-amber-300">Bonus Archive - Week {state.currentWeek + 1}</h3>
+                </div>
+                <div className="space-y-2">
+                  {currentWeekArchivedTasks.map((task, idx) => (
+                    <div key={idx} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-emerald-400">✓</span>
+                        <span className="text-sm text-purple-200">{task.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-purple-400">{task.dayOfWeek}</span>
+                        <span className="text-emerald-400 mono">+{task.points}pt</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="text-xs text-purple-400 mt-3 text-center">
+                  {currentWeekArchivedTasks.length} task{currentWeekArchivedTasks.length !== 1 ? 's' : ''} completed this week
+                </div>
+              </div>
+            )}
 
             {/* 30-Day Heatmap (GitHub-style contribution graph) */}
             <div className="glass rounded-xl p-4 mt-8 animate-slide-in">
