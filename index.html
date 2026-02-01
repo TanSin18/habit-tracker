@@ -1340,6 +1340,10 @@
       const [showStreakDrilldown, setShowStreakDrilldown] = useState(false);
       const [earningsAnimating, setEarningsAnimating] = useState(false);
 
+      // Neural Reset Modal State (for Dopamine Baseline)
+      const [showNeuralResetModal, setShowNeuralResetModal] = useState(false);
+      const [neuralResetDayIndex, setNeuralResetDayIndex] = useState(null);
+
       // Haptic feedback utility
       const triggerHaptic = (type = 'light') => {
         if ('vibrate' in navigator) {
@@ -1808,6 +1812,30 @@
 
         saveState(newState);
         setLastSaved(Date.now());
+      };
+
+      // Neural Reset function for Dopamine Baseline (long-press triggered)
+      const triggerNeuralReset = (dayIndex, resetType) => {
+        const day = currentWeek.days[dayIndex];
+        if (day.isLocked || day.isOffDay) return;
+
+        const newState = JSON.parse(JSON.stringify(state));
+        newState.weeks[state.currentWeek].days[dayIndex].habits.nofap = 0;
+        newState.weeks[state.currentWeek].days[dayIndex].isFilled = true;
+        newState.weeks[state.currentWeek].days[dayIndex].lastUpdated = new Date().toISOString();
+
+        if (resetType === 'soft') {
+          // Soft reset: subtract 2 days (weekend maintenance mode)
+          newState.streakDays = Math.max(0, newState.streakDays - 2);
+        } else {
+          // Hard reset: full streak reset to 0
+          newState.streakDays = 0;
+        }
+
+        saveState(newState);
+        setShowNeuralResetModal(false);
+        setNeuralResetDayIndex(null);
+        triggerHaptic('heavy');
       };
 
       const updateReading = (dayIndex, pages) => {
@@ -2412,186 +2440,66 @@
               </div>
             )}
 
-            {/* Screen Time Quota Panel */}
-            {(() => {
-              const screenStats = getTodayScreenTime();
-              const quotaPercent = Math.min(100, (screenStats.entertainment / SCREEN_QUOTA.ENTERTAINMENT_DAILY_LIMIT) * 100);
-              const quotaClass = quotaPercent >= 100 ? 'quota-fill-danger' : quotaPercent >= 70 ? 'quota-fill-warning' : 'quota-fill-safe';
+            {/* Neural Reset Modal */}
+            {showNeuralResetModal && neuralResetDayIndex !== null && (
+              <div className="modal-overlay" onClick={() => { setShowNeuralResetModal(false); setNeuralResetDayIndex(null); }}>
+                <div className="glass rounded-2xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+                  <div className="text-center mb-6">
+                    <div className="text-5xl mb-3">🧠</div>
+                    <h3 className="text-xl font-bold mb-2">Initiate Neural Reset?</h3>
+                    <p className="text-sm text-purple-300">
+                      This will mark today as a relapse and affect your streak.
+                    </p>
+                  </div>
 
-              return (
-                <div className={`glass rounded-xl p-4 mb-6 animate-slide-in screen-timer ${timerRunning ? 'screen-timer-running' : ''} ${screenStats.isOverQuota ? 'time-leak-warning' : ''}`}>
-                  {/* Header - Click to expand */}
-                  <div
-                    className="flex items-center justify-between cursor-pointer"
-                    onClick={() => setShowTimerPanel(!showTimerPanel)}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="text-2xl">{timerRunning ? (timerMode === 'educational' ? '📚' : '📺') : '⏱️'}</div>
-                      <div>
-                        <div className="text-sm font-semibold text-purple-300">
-                          {timerRunning ? `Timer Running (${timerMode === 'educational' ? 'Educational' : 'Entertainment'})` : 'Screen Time Quota'}
-                        </div>
-                        <div className="text-xs text-purple-400">
-                          {screenStats.entertainment} / {SCREEN_QUOTA.ENTERTAINMENT_DAILY_LIMIT} min entertainment
-                          {screenStats.isOverQuota && <span className="text-red-400 font-bold ml-2">TIME LEAK!</span>}
+                  <div className="space-y-3">
+                    {/* Soft Reset - Weekend Only */}
+                    {(() => {
+                      const dayDate = new Date(currentWeek.days[neuralResetDayIndex]?.date);
+                      const dayOfWeek = dayDate.getDay();
+                      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+                      return isWeekend ? (
+                        <button
+                          onClick={() => triggerNeuralReset(neuralResetDayIndex, 'soft')}
+                          className="w-full py-3 px-4 rounded-xl font-semibold bg-gradient-to-r from-amber-600 to-orange-600 text-white text-left"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl">🛡️</span>
+                            <div>
+                              <div className="text-sm font-bold">Soft Reset</div>
+                              <div className="text-xs opacity-80">Weekend Mode: -2 days only</div>
+                            </div>
+                          </div>
+                        </button>
+                      ) : null;
+                    })()}
+
+                    {/* Hard Reset */}
+                    <button
+                      onClick={() => triggerNeuralReset(neuralResetDayIndex, 'hard')}
+                      className="w-full py-3 px-4 rounded-xl font-semibold bg-gradient-to-r from-red-600 to-rose-700 text-white text-left"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">💥</span>
+                        <div>
+                          <div className="text-sm font-bold">Hard Reset</div>
+                          <div className="text-xs opacity-80">Full streak reset to zero</div>
                         </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {timerRunning && (
-                        <div className="timer-display text-lg">
-                          {formatTimerDisplay(timerElapsed)}
-                        </div>
-                      )}
-                      <span className="text-purple-400 text-xl">{showTimerPanel ? '▼' : '▶'}</span>
-                    </div>
+                    </button>
+
+                    {/* Cancel */}
+                    <button
+                      onClick={() => { setShowNeuralResetModal(false); setNeuralResetDayIndex(null); }}
+                      className="w-full py-3 rounded-xl font-semibold bg-white/10 hover:bg-white/20 text-purple-300"
+                    >
+                      Cancel
+                    </button>
                   </div>
-
-                  {/* Entertainment Quota Bar */}
-                  <div className="mt-3">
-                    <div className="quota-bar">
-                      <div
-                        className={`quota-fill ${quotaClass}`}
-                        style={{ width: `${quotaPercent}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between mt-1 text-[10px] text-purple-500">
-                      <span>{screenStats.quotaRemaining} min remaining</span>
-                      <span>{screenStats.educational} min educational today</span>
-                    </div>
-                  </div>
-
-                  {/* Expanded Timer Panel */}
-                  {showTimerPanel && (
-                    <div className="mt-4 pt-4 border-t border-purple-500/20">
-                      {!timerRunning ? (
-                        <>
-                          {/* Mode Selection */}
-                          <div className="text-xs text-purple-400 mb-2 font-semibold">Select Content Type:</div>
-                          <div className="mode-selector mb-4">
-                            <button
-                              onClick={() => startTimer('educational')}
-                              className={`mode-btn bg-gradient-to-r ${SCREEN_MODES.EDUCATIONAL.color} text-white`}
-                            >
-                              <div className="text-lg mb-1">{SCREEN_MODES.EDUCATIONAL.icon}</div>
-                              <div>Educational</div>
-                              <div className="text-[9px] opacity-75 mt-1">+Career pts</div>
-                            </button>
-                            <button
-                              onClick={() => startTimer('entertainment')}
-                              className={`mode-btn bg-gradient-to-r ${SCREEN_MODES.ENTERTAINMENT.color} text-white`}
-                            >
-                              <div className="text-lg mb-1">{SCREEN_MODES.ENTERTAINMENT.icon}</div>
-                              <div>Entertainment</div>
-                              <div className="text-[9px] opacity-75 mt-1">90 min quota</div>
-                            </button>
-                          </div>
-
-                          {/* Rules Summary */}
-                          <div className="text-[10px] text-purple-500 space-y-1">
-                            <div>• Educational time adds to Career Development</div>
-                            <div>• Entertainment limited to {SCREEN_QUOTA.ENTERTAINMENT_DAILY_LIMIT} min/day</div>
-                            <div>• Exceeding quota = {SCREEN_QUOTA.TIME_LEAK_PENALTY}pt penalty</div>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          {/* Running Timer Display */}
-                          <div className="text-center mb-4">
-                            <div className="timer-display text-4xl mb-2">
-                              {formatTimerDisplay(timerElapsed)}
-                            </div>
-                            <div className={`text-sm font-semibold ${timerMode === 'educational' ? 'text-emerald-400' : 'text-amber-400'}`}>
-                              {timerMode === 'educational' ? '📚 Educational Mode' : '📺 Entertainment Mode'}
-                            </div>
-                            {timerMode === 'entertainment' && (
-                              <div className="text-xs text-purple-400 mt-1">
-                                {Math.max(0, screenStats.quotaRemaining - Math.floor(timerElapsed / 60))} min quota remaining
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Stop Button */}
-                          <button
-                            onClick={() => stopTimer()}
-                            className="w-full py-3 rounded-xl font-bold bg-gradient-to-r from-red-500 to-rose-600 text-white hover:from-red-600 hover:to-rose-700 transition-all"
-                          >
-                            ⏹ Stop Timer
-                          </button>
-
-                          {/* Warning if approaching quota */}
-                          {timerMode === 'entertainment' && screenStats.quotaRemaining - Math.floor(timerElapsed / 60) <= 15 && (
-                            <div className="mt-3 text-center text-xs text-amber-400 animate-pulse">
-                              ⚠️ Approaching entertainment quota limit!
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Timer progress bar when running */}
-                  {timerRunning && timerMode === 'entertainment' && (
-                    <div
-                      className={`timer-progress-bar ${quotaPercent >= 100 ? 'bg-red-500' : 'bg-indigo-500'}`}
-                      style={{ width: `${Math.min(100, ((screenStats.entertainment + Math.floor(timerElapsed / 60)) / SCREEN_QUOTA.ENTERTAINMENT_DAILY_LIMIT) * 100)}%` }}
-                    />
-                  )}
-                </div>
-              );
-            })()}
-
-            {/* Tier Thresholds Info */}
-            <div className="glass rounded-xl p-4 mb-6 animate-slide-in">
-              <div className="text-sm font-semibold text-purple-300 mb-2">Dynamic Targets ({stats.activeDaysCount}/7 days active)</div>
-              <div className="grid grid-cols-4 gap-2 text-xs">
-                <div className="text-center">
-                  <div className="text-yellow-400 font-bold">{stats.dynamicThresholds.elite}+</div>
-                  <div className="text-purple-400">Elite</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-blue-400 font-bold">{stats.dynamicThresholds.solid}+</div>
-                  <div className="text-purple-400">Solid</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-green-400 font-bold">{stats.dynamicThresholds.decent}+</div>
-                  <div className="text-purple-400">Decent</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-orange-400 font-bold">{stats.dynamicThresholds.struggling}+</div>
-                  <div className="text-purple-400">Struggle</div>
                 </div>
               </div>
-            </div>
-
-            {/* Reward/Penalty Card */}
-            <div className={`rounded-xl p-6 mb-6 animate-slide-in ${
-              stats.tier.reward
-                ? 'bg-gradient-to-br from-emerald-600 to-teal-700 glow'
-                : 'bg-gradient-to-br from-rose-600 to-red-800 animate-pulse-red'
-            }`}>
-              <div className="text-center">
-                <div className="text-sm font-semibold mb-2 opacity-90">
-                  {stats.tier.reward ? 'WEEKLY REWARD' : 'WEEKLY PENALTY'}
-                </div>
-                <div className="text-5xl font-black mb-2 mono">
-                  {stats.tier.reward ? '+' : '-'}${stats.tier.reward || stats.tier.penalty}
-                </div>
-                <div className="text-sm opacity-90">
-                  {stats.tier.reward
-                    ? `-> Guilt-Free Fund`
-                    : `-> NRE Account (Locked)`}
-                </div>
-                <div className="text-xs mt-3 opacity-75">
-                  Need {stats.dynamicThresholds.decent}+ points to avoid penalty
-                </div>
-                {!stats.bonusEligible && stats.weeklyBonusScore > 0 && (
-                  <div className="text-xs mt-2 bg-black/20 rounded px-2 py-1 inline-block">
-                    Core: {stats.weeklyCoreScore}/{Math.round(stats.coreThreshold)} needed for bonus eligibility
-                  </div>
-                )}
-              </div>
-            </div>
+            )}
 
             {/* View Mode Toggle */}
             <div className="flex gap-2 mb-6 animate-slide-in">
@@ -3275,6 +3183,71 @@
                                     {weeklyComplete ? habit.points : 0}/{habit.points}
                                   </span>
                                 </button>
+                              );
+                            }
+
+                            // Special handling for Dopamine Baseline (Neural Sync - auto-active, long-press to reset)
+                            if (habit.id === 'nofap') {
+                              const isRelapsed = habitValue === 0;
+                              const dayDate = new Date(day.date);
+                              const dayOfWeek = dayDate.getDay();
+                              const isWeekendDay = dayOfWeek === 0 || dayOfWeek === 6;
+
+                              return (
+                                <div
+                                  key={habit.id}
+                                  className={`p-3 rounded-lg font-semibold text-sm relative overflow-hidden cursor-pointer ${
+                                    isDisabled
+                                      ? 'opacity-50 bg-gray-700'
+                                      : isRelapsed
+                                      ? 'bg-gradient-to-r from-rose-600 to-red-800 text-white'
+                                      : 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white'
+                                  }`}
+                                  onTouchStart={() => {
+                                    if (!isDisabled && !isRelapsed) {
+                                      startLongPress(actualDayIndex, () => {
+                                        setNeuralResetDayIndex(actualDayIndex);
+                                        setShowNeuralResetModal(true);
+                                      });
+                                    }
+                                  }}
+                                  onTouchEnd={cancelLongPress}
+                                  onTouchCancel={cancelLongPress}
+                                  onMouseDown={() => {
+                                    if (!isDisabled && !isRelapsed) {
+                                      startLongPress(actualDayIndex, () => {
+                                        setNeuralResetDayIndex(actualDayIndex);
+                                        setShowNeuralResetModal(true);
+                                      });
+                                    }
+                                  }}
+                                  onMouseUp={cancelLongPress}
+                                  onMouseLeave={cancelLongPress}
+                                >
+                                  {/* Long press progress indicator */}
+                                  {longPressProgress > 0 && (
+                                    <div
+                                      className="long-press-indicator"
+                                      style={{ width: `${longPressProgress}%` }}
+                                    />
+                                  )}
+
+                                  <div className="flex items-center justify-between">
+                                    <span className="flex items-center gap-2">
+                                      <span className="text-lg habit-icon">{stealthMode ? habit.stealthIcon : '🧠'}</span>
+                                      <span className="text-xs">{stealthMode ? habit.stealthName : 'Neural Baseline'}</span>
+                                    </span>
+                                    <span className="text-xs mono opacity-75">
+                                      {isRelapsed ? '0' : habit.points}/{habit.points}
+                                    </span>
+                                  </div>
+                                  <div className="text-[9px] text-center mt-1 opacity-70">
+                                    {isRelapsed
+                                      ? '❌ Reset Triggered'
+                                      : '✓ Active • Hold to reset'
+                                    }
+                                  </div>
+                                </div>
                               );
                             }
 
