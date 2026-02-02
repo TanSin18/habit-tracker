@@ -3645,13 +3645,53 @@
                   if (response.ok) {
                     const result = await response.json();
                     if (result.success && result.data) {
-                      // Restore the data
-                      const restoredState = checkAndCreateNewWeeks(result.data);
-                      setState(restoredState);
-                      saveToStorage(restoredState);
-                      setShowSheetsModal(false);
-                      triggerHaptic('sparkle');
-                      return { success: true, streak: result.streak };
+                      try {
+                        // Validate and migrate data structure
+                        let restoredData = result.data;
+
+                        // Ensure required fields exist
+                        if (!restoredData.weeks || !Array.isArray(restoredData.weeks)) {
+                          return { success: false, error: 'Invalid data structure: missing weeks array' };
+                        }
+
+                        // Add missing fields with defaults
+                        restoredData.streakDays = restoredData.streakDays || 0;
+                        restoredData.longestStreak = restoredData.longestStreak || restoredData.streakDays || 0;
+                        restoredData.guiltFreeBalance = restoredData.guiltFreeBalance || 0;
+                        restoredData.nreBalance = restoredData.nreBalance || 0;
+                        restoredData.currentWeek = restoredData.currentWeek || 0;
+                        restoredData.viewMode = restoredData.viewMode || 'today';
+                        restoredData.adHocTasks = restoredData.adHocTasks || [];
+                        restoredData.deviceId = restoredData.deviceId || `device_${Date.now()}`;
+                        restoredData.lastModified = restoredData.lastModified || Date.now();
+
+                        // Ensure each week has proper structure
+                        restoredData.weeks = restoredData.weeks.map(week => ({
+                          ...week,
+                          days: (week.days || []).map(day => ({
+                            ...day,
+                            habits: day.habits || {},
+                            completedTasks: day.completedTasks || [],
+                            pagesRead: day.pagesRead || 0,
+                            sleepTime: day.sleepTime || '',
+                            productivityRating: day.productivityRating ?? 2,
+                            isFilled: day.isFilled || false,
+                            isLocked: day.isLocked || false,
+                            isOffDay: day.isOffDay || false
+                          }))
+                        }));
+
+                        // Now try to process with checkAndCreateNewWeeks
+                        const finalState = checkAndCreateNewWeeks(restoredData);
+                        setState(finalState);
+                        saveToStorage(finalState);
+                        setShowSheetsModal(false);
+                        triggerHaptic('sparkle');
+                        return { success: true, streak: result.streak };
+                      } catch (parseErr) {
+                        console.error('Data restore error:', parseErr);
+                        return { success: false, error: `Failed to parse restored data: ${parseErr.message}` };
+                      }
                     } else if (result.success && !result.data) {
                       return { success: false, error: 'No data found in Google Sheet. Make sure you have synced data before.' };
                     }
