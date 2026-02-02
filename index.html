@@ -3632,12 +3632,18 @@
                 // Try to fetch data from the provided sheets URL with timeout
                 try {
                   const controller = new AbortController();
-                  const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 sec timeout
+                  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 sec timeout
 
+                  // Try fetch with explicit CORS settings
                   const response = await fetch(url, {
                     method: 'GET',
                     redirect: 'follow',
-                    signal: controller.signal
+                    mode: 'cors',
+                    credentials: 'omit',
+                    signal: controller.signal,
+                    headers: {
+                      'Accept': 'application/json'
+                    }
                   });
 
                   clearTimeout(timeoutId);
@@ -3699,9 +3705,13 @@
                   return { success: false, error: `Request failed: ${response.status} ${response.statusText}` };
                 } catch (err) {
                   if (err.name === 'AbortError') {
-                    return { success: false, error: 'Request timed out. Check your internet connection and try again.' };
+                    return { success: false, error: 'Request timed out (30s). Click "Test URL" to check if script works in browser. If it shows JSON there, copy the "data" part and use browser console to restore manually.' };
                   }
-                  return { success: false, error: `Error: ${err.message}. Make sure you redeployed the Apps Script.` };
+                  // Try to give more helpful error
+                  if (err.message.includes('Failed to fetch')) {
+                    return { success: false, error: 'Network error. Click "Test URL" to open in browser - if you see JSON data there, the script works but CORS is blocking it.' };
+                  }
+                  return { success: false, error: `Error: ${err.message}` };
                 }
               }}
             />
