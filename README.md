@@ -134,12 +134,14 @@ open index.html
 ### Daily Points
 | Habit | Points | Category |
 |-------|--------|----------|
-| NoFap/Dopamine Baseline | 3 | Core |
-| Lunch/Dinner (home cooked) | 2 each | Health |
-| Gym | 1 | Fitness |
+| Home-cooked Meals | 2 each | Health |
+| Gym/Training | 1 | Fitness |
 | Reading | 1-20 (tiered) | Growth |
 | Meditation | 1 | Mindfulness |
-| And 10 more... | | |
+| Journaling | 1 | Reflection |
+| Career Development | 1 | Growth |
+| Sleep Tracking | 1 | Health |
+| And more... | | |
 
 ### Weekly Tiers
 | Tier | Score | Reward/Penalty |
